@@ -1,0 +1,757 @@
+---
+title: "Geostatistical Data Integration Framework"
+subtitle: 'Code to accompany paper'
+author: "[Sabine Loos](https://sabine-loos.com)"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+    theme: yeti
+    highlight: pygments
+    fig_align: center
+    df_print: paged
+    code_folding: hide
+    fig_caption: true
+  html_notebook:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+    theme: yeti
+    highlight: pygments
+    fig_align: center
+    df_print: paged
+    code_folding: hide
+bibliography: '../results/references.bib'
+---
+```{r setup, echo=F}
+# SETUP
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+knitr::opts_chunk$set(warning = F, message = F, dpi = 600, fig.align = 'center')
+```
+
+# Introduction to the framework and application
+***
+<br>
+In this notebook, we run through the basic steps to implement the geospatial data integration framework (G-DIF) presented in "A geospatial data integration framework to rapidly estimate post-disaster damage" by Sabine Loos, Jack Baker, David Lallemant, and **sabine add other authors**.  
+
+The **goal** of this paper is to provide a framework to integrate multiple damage data sources that become available after an earthquake, including: field surveys, remote-sensing proxies, engineering forecasts, and other geospatial covariates. More information can be found in the paper, but here is the general flowchart:
+
+```{r flowchart, out.width="70%"}
+knitr::include_graphics("../results/Images/RK_Framework_simple.png")
+```
+<br>
+## Packages and functions
+*This code is specifically meant to show how we develop the framework for the example scenario and dataset presented in the paper, however, it is possible to modify the code with new spatial dataframes for new settings.*
+The code for this is split between this main markdown and multiple functions. The entire source code can be found at [https://github.com/sabineloos/GDIF-damageprediction](https://github.com/sabineloos/GDIF-damageprediction).
+```{r Loading packages and functions, collapse=TRUE}
+rm(list=ls(all = T))
+# source("code/install.R") # if you need to install packages uncomment this
+require(car) # for VIF checking
+require(caret) # for mixed stepwise selection
+require(gstat) # for kriging
+require(sp) # for reading/writing to shapefile
+require(rgeos)
+require(maptools) # for spcbind
+require(automap) # for autofit variogram
+require(raster) # for making rasters
+require(rasterVis) # for plotting rasters
+require(ggplot2); theme_set(theme_bw()) # for plotting;
+require(gridExtra) # for arranging plots side-by-side
+require(foreach) # for foreach parallel loops
+require(future) # for future parallel backend
+require(doFuture) # for using future backend for froeach loops
+require(GGally) # for plotting correlation matrices
+
+# Outside functions
+source("code/Functions/PlottingFunctions.R") #contains functions used to create plots in this markdown
+source("code/Functions/RK_LS_trend.R") # main function to define the trend model
+source("code/Functions/OK_parallel.R") # function to perform ordinary kriging in parallel for spatial correlation of residuals
+source("code/Functions/RK_errormet.R") # function to quantify error metrics of prediction and uncertainties
+source("code/Functions/nscore.R") # function to perform a normal score transformation
+source("code/Functions/polygon2points.R") # function to turn SpatialPolygonsDataFrame to SpatialPointsDataFrame
+source("code/Functions/comb_dup.R") # for combining dataframes with duplicate entries
+source("code/Functions/sp2gg.R") #contains functions to convert spatial to ggplot dataframe
+```
+
+```{r plotting things, echo=F, results='hide'}
+# colors
+GDIF_col <- viridis::viridis_pal()(25)[9]
+ENG_col <- "gray30"
+OG_col <- "lightcyan3"
+
+labs <- c(RK = "G-DIF",ENG = "Engineering Forecast")
+cols <- c("All locations" = "black", "Field surveyed locations" = OG_col)
+cols_gdifeng <- c(RK = GDIF_col, ENG = ENG_col)
+```
+
+## Load data from the 2015 Nepal Earthquake
+Here, we implement G-DIF with data from the 2015 Nepal earthquake. Our area of interest is the 11 districts surrounding Kathmandu Valley. This code depends on an already prepared spatial dataframe (i.e. grids, polygons, or points) that has values for the primary data (e.g. the dependent variable, typically from field surveys, to be predicted) and the secondary data (e.g. the independent variables). Here we use the following data sources that were either already available or produced after the earthquake:
+
+1. **Field surveys** of impact at the household-level, organized by Nepal's Central Bureau of Statistics and organized by our collaborators at Kathmandu Living Labs. This data has been made openly available in [the 2015 Nepal Earthquake Open Data Portal](http://eq2015.npc.gov.np/#/).
+2. A map of **shaking intensity** from the United States Geological Survey (USGS). This provides the Modified Mercalli Intensity at 1.75 km resolution. This uses the latest ShakeMap (version 4) [@Worden2010, @Worden2016ShakeMapRelease]
+3. A self-developed **engineering forecast** of damage. This uses the USGS shaking intensity + fragility curves from NSET + Landscan population exposure to predict the mean damage ratio at a 1km resolution [@Jarvis2008, @LandScan:2012tj]
+4. A [**damage proxy map (DPM)**](https://aria-share.jpl.nasa.gov/) developed through inSAR-based coherence differencing from the ARIA project at the NASA Jet Propulsion Lab. This provides a damage proxy number from -1 to 1 at 30m resolution [@Yun2015]
+5. A [**digital elevation model**](https://cgiarcsi.community/data/srtm-90m-digital-elevation-database-v4-1/) from CGIAR Consortium for Spatial Information. This provides the elevation at a 90 m resolution. [@Jarvis2008]
+
+We convert each dataset to the same support and load as one spatial dataframe (**alldat_shp**) before inputting in the framework. The format is a gridded dataframe at a resolution of .0028$^\circ$ $\times$ .0028$^\circ$ (~290m $\times$ 290m). The variables in the dataframe are:
+
+- `GRID_ID` -- ID number of the grid
+- `GT_mnDG` -- Groundtruth mean damage grade, average field surveyed damage within grid
+- `ENG_mnDR` -- Mean damage ratio from the engineering forecast
+- `DPM_bldg_med` -- Median DPM pixel value overlaying buildings within a grid
+- `MMI_mn` - Modified Mercalli Intensity value over the centroid of each grid
+- `DEM_mn` - Elevation in meters over centroid of each grid
+- `Area_deg` - Area of the gird in degrees
+
+```{r Loading dataframes}
+# Load data frame that has been prepared for the framework
+alldat_shp <- readRDS(file = "data/Nepal_11dist_damagedata_grids.rds")
+alldat_shp@data[1:5,]
+```
+
+```{r Mapping variables, echo=FALSE, out.width='100%', fig.show = 'hold'}
+# turn data into rasters or ggplot2 dataframes for plotting
+gridded(alldat_shp) = T
+alldat_rast <- raster::brick(alldat_shp)
+
+# plot maps individually
+p.GT <- plot_raster_nepal(alldat_rast$GT_mnDG, legend_title = "Mean Damage Grade", base_size = 7)+labs(title = "True damage") # field data
+lims <- round(range(alldat_shp$ENG_mnDR[-which(alldat_shp$ENG_mnDR == 0)], na.rm = T),2)
+p.ENG <- plot_raster_nepal(alldat_rast$ENG_mnDR, legend_title = "Mean Damage Ratio", scale_legend = T, legend_lims = lims, base_size = 7)+labs(title = "Eng. Forecast") # engineering forecast (masking 0's)
+p.DPM <- plot_raster_nepal(alldat_rast$DPM_bldg_med, legend_title = "Median DPM Integer", scale_legend = T, base_size = 7)+labs(title = "Damage Proxy Map") # Damage proxy map
+p.MMI <- plot_raster_nepal(alldat_rast$MMI_mn, legend_title = "MMI", scale_legend = T, base_size = 7)+labs(title = "Shaking Intensity") # shaking intensity
+p.DEM <- plot_raster_nepal(alldat_rast$DEM_mn, legend_title = "Elevation (m)", scale_legend = T, base_size = 7)+labs(title = "Elevation") # Digital Elevation Model
+
+# combine into one map
+pl <- list(p.GT,p.ENG, p.DPM, p.MMI,p.DEM)
+grid.arrange(grobs = lapply(pl, "+", theme(plot.margin = unit(c(10,10,10,10), "points"))), ncol = 3, nrow = 2)
+```
+
+# G-DIF methodology
+***
+This code uses the centroid of each grid to calculate distances. We therefore check if the data is a points data frame, and if not, convert it to one using `polygon2points`.  
+```{r check dataframe}
+if(class(alldat_shp) != "SpatialPointsDataFrame"){# check if already a spatial points dataframe
+  alldat_shp <- polygon2points(alldat_shp)}
+```
+
+## Define modeling parameters and dataframes{#parameters}
+In order to model, we need to know what we are predicting, what we use to predict, and how many data points we have.
+
+```{r define modeling parameters}
+# DEFINE the target (or output) variable and create a new column called GT_OUT. 
+target_var = c("GT_mnDG")
+ind_target = which(names(alldat_shp) == target_var[1])
+alldat_shp$GT_OUT = alldat_shp@data[,ind_target]
+
+# DEFINE the ID variable
+id_var = "GRID_ID"
+
+# DEFINE names for secondary data
+seconddat_vars <- c("ENG_mnDR","DPM_bldg_med","MMI_mn","DEM_mn")
+
+# DEFINE the number of field surveys (taking a random sample)
+nsurvey = 100
+
+# DEFINE seed (for reproducibility purposes) 
+seed = 977 # this is the area code for Nepal ;)
+
+# DEFINE local kriging parameters (optional)
+# kriging options for local kriging (saves time)
+maxdist.multiplier <- 2 # use 2x the spatial corelation range for kriging
+nmin <- 2 # minimum number of points to consider 
+nmax <- 20 # maximum number of points to consider
+
+# The range of predictions allowed
+targ_min <- min(alldat_shp$GT_OUT, na.rm = T)
+targ_max <- max(alldat_shp$GT_OUT, na.rm = T)
+```
+
+- `target_var` = Target variable, this is the variable we would like to predict for every grid in the dataframe, based on the field surveyed damage. We create a new column called GT_OUT. In this case, we use `r target_var`, or the mean damage grade per grid.
+- `nsurvey` = Number of grids that will be surveyed. In this case, we use 100 randomly selected grids. Note that a survey of `r nsurvey` grids has more than `r nsurvey` buildings. In actuality we know what `r target_var` is at all locations (but we will use this for validation in [Section 3](#validation-link))
+- `seconddat_vars` = Secondary data variables, these are the variables we will use to predict the target variable, based on all secondary damage data. We use `r seconddat_vars`.
+- `seed` = the random seed we use for reproducibility. Here we use `r seed`, which is the area code for Kathmandu :)
+- `id_var` = ID variable
+- `maxdist.multiplier` = For the spatial correlation model, we krige the residuals only using points within `r maxdist.multiplier` times the spatial correlation range of a point
+- `nmin` and `nmax` = Fpr the spatial correlation model, the minimum and maximum number of points to consider as an alternative to `maxidst.multiplier`
+
+```{r finding areas with dpm}
+# grids with buildings
+ind_bldgs <- which(!is.na(alldat_shp$GT_mnDG))
+
+# read in boundary of F540 and F550 frames used to create the DPM (these have been merged separately
+boundary_dpm <- readRDS(file = "data/DPM_f540550boundary.rds")
+
+# Find index for areas with and without dpm (because we're making separate models for each)
+ind_nodpm <- which(is.na(alldat_shp$DPM_bldg_med[ind_bldgs]))
+ind_dpm <- which(!is.na(alldat_shp$DPM_bldg_med[ind_bldgs]))
+# Calculate the percentage of the total area that is covered by the DPM. We will use this to calculate the proportion of field surveys in and out of the DPM.
+p_area_dpm =rgeos::gArea(boundary_dpm)/sum(alldat_shp$Area_deg)
+n_grids_dpm <- length(ind_dpm)
+n_grids_nodpm <- length(ind_nodpm)
+```
+
+Also, one of our secondary damage data variables (`DPM_bldg_med`) is only at a subset of our entire area of interest. Because of this, we split up our field surveys proportionally according to the percentage of the area that the DPM covers (`p_area_dpm` = `r round(p_area_dpm*100,2)`%). Therefore, out of the `r nsurvey` grids we survey, `r round(nsurvey*p_area_dpm)` have DPM values and `r nsurvey - round(nsurvey*p_area_dpm)` do not have DPM values.
+
+We use these parameters to create two dataframes:
+
+1. `pred_shp` = The prediction spatial dataframe where we add all our predictions. Note that here, we only predict at the `r length(ind_bldgs)` grids with buildings to speed up computation (but one could predict at all points as well).
+2. `field_sample_shp` = The field spatial dataframe (i.e. the training dataframe) that contains the subset of `r nsurvey` grids at the location of the field surveys. 
+
+Here, we also perform a normal score transformation (NST) of the secondary data variables using `nscore`. 
+```{r creating dataframes}
+# apply a normal score transformation
+pred_shp <- maptools::spCbind(alldat_shp[ind_bldgs,c(id_var, "GT_OUT")],
+                                   data.frame(apply(alldat_shp@data[,seconddat_vars],
+                                                    2, nscore))[ind_bldgs,])
+# field_sample_shp is the subset of locations of the grids that have been field surveyed
+set.seed(seed); 
+ind_dpm_field <- ind_dpm[sample(n_grids_dpm, round(nsurvey*p_area_dpm), replace = F)]
+ind_nodpm_field <- ind_nodpm[sample(n_grids_nodpm, (nsurvey - round(nsurvey*p_area_dpm)), replace = F)]
+ind_field <- append(ind_dpm_field, ind_nodpm_field)
+field_sample_shp <- pred_shp[ind_field,]
+
+# redefine indices for those grids that don't have dpm values in dpm boundary and move to ind_nodpm
+ind_nodpm_field <- which(is.na(field_sample_shp$DPM_bldg_med))
+ind_dpm_field <- which(!is.na(field_sample_shp$DPM_bldg_med))
+```
+
+## Exploring the data
+
+As a summary, we will be using the following `r nsurvey` grids for training our model:  
+<br>
+```{r plotting field points, echo=FALSE, out.width='50%'}
+field_df <- as.data.frame(field_sample_shp)
+field_df$in_DPM <- "With"; field_df$in_DPM[ind_nodpm_field] <- "Without"
+plot_points_nepal(field_df, color = in_DPM)+ 
+  geom_polygon(data = sp2gg(SpatialPolygonsDataFrame(boundary_dpm, data = data.frame(data = 1), match.ID = F)), 
+               aes(long, lat), colour = "black", fill = "transparent")+
+  scale_color_discrete("DPM-values present?")+
+  labs(title = "Locations of field surveyed grids", subtitle = paste0(nsurvey, " locations: ", length(ind_dpm_field), " with and ", length(ind_nodpm_field), " without DPM values"))
+```
+
+Ideally, we would like to see a relationship between our target variable, `r target_var` and the secondary variables. We would also want our field survey sample to decently match the distributions from the data from all locations. We can verify this using the following correlation matrix.
+
+```{r make correlation matrix, echo = F}
+# make dataframe with full dataset and field in one
+pred_df <- alldat_shp@data[ind_bldgs,append("GT_OUT", seconddat_vars)]
+field_df <-alldat_shp@data[ind_bldgs[ind_field],append("GT_OUT", seconddat_vars)]
+pred_df$locns <- factor("All locations"); field_df$locns <- factor("Field surveyed locations")
+comb_wide <- rbind(pred_df[sample(nrow(pred_df), 10000, replace = F),], field_df)
+leg <- ggplot(comb_wide) + geom_histogram(aes(GT_OUT, fill = locns)) +
+  scale_fill_manual("", values = cols)+theme(legend.direction = "vertical", legend.spacing = unit(0.05, "cm"),text = element_text(colour = "grey30", family = "Open Sans"))
+comb_wide$GT_OUT <- as.vector(comb_wide$GT_OUT)
+# correlation matrix
+p.corr <- ggpairs(dplyr::filter(comb_wide, ENG_mnDR > 0),columns = 1:5,
+             progress = F,
+             mapping = ggplot2::aes(colour = locns),axisLabels = "none",switch = "both",legend = grab_legend(leg),
+             upper = list(continuous = gglegend("points")),
+             diag = list(continuous = wrap(my_fn_diag,
+                                           dens = list(aes(fill = locns, y = ..density..),
+                                                       bins = 20,position = "identity",colour = "transparent", alpha = 0.75))),
+             lower = list(continuous = wrap(my_fn,
+                                            pts=list(data = dplyr::filter(comb_wide[append(sample(10000, 1000,replace = F),10000:10100),], 
+                                                                          ENG_mnDR >0),shape = ".",alpha = 0.5 ,aes(colour=locns)), 
+                                            smt=list(method="loess", se=F, size=1, aes(colour = locns)))),
+             columnLabels = c("True damage","Eng. forecast", "Damage proxy map", "Shaking intensity", "Elevation"))+
+  theme_minimal()+theme(panel.grid = element_blank(),text = element_text(colour = "grey30", family = "Open Sans"),
+                        legend.position = "bottom")
+```
+
+```{r plot correlation matrix,echo=FALSE, fig.align='center', out.width='100%', fig.asp=1}
+p.corr
+```
+
+## Trend model
+Here, we use a linear least squares regression model to estimate the trend for the area with DPM values and the area without DPM values. We use the function `RK_LS_trend` to perform model selection, deciding between an Ordinary Least Squares (OLS) model and a Generalized Least Squares (GLS) model. In this function, we perform a five-fold cross-validation with both the GLS and OLS models. 
+
+The inputs to `RK_LS_trend` are as follows:
+
+- `locn_shp` = The spatial dataframe that contains the data at the locations that have been surveyed (i.e. `field_sample_shp`).
+- `newdata_shp` = The spatial dataframe that contains the locations where to estimate the trend (i.e. `pre_shp`)
+- `stepwise` = T/F to indicate whether to perform stepwise selection because of multicollinearity
+- `dependent.var_char` = The character value of the dependent variable (i.e. `r target_var`)
+- `independent.var_vec` = The character vector of the independent variables. These change between the areas with and without the DPM.
+- `id.var_char` = The character value of the ID variable (i.e. `GRID_ID`)
+- `return_se` = T/F to indicate whether to include the estimated coefficients and standard errors of the estimated trends
+
+### For the area with the DPM
+The equation for the trend with the DPM is:
+
+$$ m(s) = \beta_1(ENGmnDR) + \beta_2 (DPM) + \beta_3 (MMI) + \beta_4 (DEM) + c$$
+Before running `RK_LS_trend`, we need to assess whether multicollinearity may be an issue, in which case we would need to perform a mixed stepwise selection. We do this by assessing the variance inflation factor (VIF). If the VIF is greater than 5, we set `stepwise = T` and run `RK_LS_trend` with stepwise selection. The VIF's for the variables used in this trend model are:
+
+```{r checking multicollinearity DPM}
+# Check if there is multicollinearity using VIF
+mod_vif <- lm(GT_OUT ~ MMI_mn + ENG_mnDR + DEM_mn + DPM_bldg_med, # formula for linear model with DPM
+              field_sample_shp@data[ind_dpm_field,]) # data frame of field data at DPM locations
+stepwise <- ifelse(any(car::vif(mod_vif)>5), T, F) # defining stepwise as T/R
+car::vif(mod_vif)
+```
+
+Since none of the VIF's are greater than 5, `stepwise` = `r stepwise`. We now use that as input into `RK_LS_trend`.
+
+```{r trned with dpm}
+# Least squares regression model for areas with DPM
+RK_trend_dpm <- RK_LS_trend(locn_shp = field_sample_shp[ind_dpm_field,], 
+                        newdata_shp = pred_shp[ind_dpm,],
+                        stepwise = stepwise, #stepwise selection of variables
+                        dependent.var_char = "GT_OUT",
+                        independent.var_vec <- seconddat_vars,
+                        id.var_char = id_var,
+                        return_se = T)
+```
+
+Looking at `RK_trend_dpm$RMSE` we can see that the trend that resulted in the lowest root mean squared error (from the function `RK_LS_trend` is the ordinary least squares trend (`r RK_trend_dpm$RMSE$model[which.min(RK_trend_dpm$RMSE$RMSE)]`). The coefficients from this estimated trend are:
+
+```{r coefficients for DPM}
+# saving the trend as that with the DPM
+RK_trend <- RK_trend_dpm
+# the coefficients from the OLS trend (do this for the trend that resulted with the lowest RMSE)
+RK_trend$se$ols.coeff
+```
+
+```{r coefficient plots for DPM, echo= F, fig.align='center', fig.asp = 0.6, out.width='60%'}
+# plot beta and standard error for trend model with DPM
+p.coeff <- plot_coeff(var_vec = names(RK_trend$se$ols.coeff),
+           coeff_vec = RK_trend$se$ols.coeff,
+           se_vec = RK_trend$se$ols,
+           names_vec = c('Intercept','Eng. forecast',"Damage proxy map", 'Shaking intensity','Elevation'),
+           var_color = GDIF_col)
+p.coeff
+```
+### For the area wihout the DPM
+We repeat the exact same procedure for the area with the DPM, except the equation for the trend is now:
+
+$$ m(s) = \beta_1(ENGmnDR) + \beta_2 (MMI) + \beta_3 (DEM) + c$$
+
+```{r trend model DPM}
+# Check if there is multicollinearity using VIF
+mod_vif <- lm(GT_OUT ~ MMI_mn + ENG_mnDR + DEM_mn,field_sample_shp@data[ind_nodpm_field,])
+stepwise <- ifelse(any(car::vif(mod_vif)>5), T, F)
+
+# Least squares regression model for areas with DPM
+RK_trend_nodpm <- RK_LS_trend(locn_shp = field_sample_shp[ind_nodpm_field,], 
+                            newdata_shp = pred_shp[ind_nodpm,],
+                            stepwise = stepwise, #stepwise selection of variables
+                            dependent.var_char = "GT_OUT",
+                            independent.var_vec <- c("MMI_mn","ENG_mnDR","DEM_mn"),
+                            id.var_char = id_var,
+                            return_se = T)
+```
+
+The coefficients for this trend are quite different (we only include the first in the paper). The trend used is still an OLS trend. These coefficients therefore dependent on the locations of the field surveys, so one can't compare the coefficients of the two trends.
+
+```{r coefficient plots for without DPM, echo= F,fig.align='center', fig.asp = 0.6, out.width='60%'}
+# plot beta and standard error for trend model with DPM
+plot_coeff(var_vec = names(RK_trend_nodpm$se$ols.coeff),
+           coeff_vec = RK_trend_nodpm$se$ols.coeff,
+           se_vec = RK_trend_nodpm$se$ols,
+           names_vec = c('Intercept', 'Shaking intensity','Eng. forecast','Elevation'),
+           var_color = GDIF_col)
+```
+
+### Merging trend predictions
+Because we have estimated the trend for two separate areas, we have to merge them back together into one spatial dataframe. We use the function `comb_dup` to do this, which takes a dataframe with two columns of the same name and merges them into one column of that name. 
+
+```{r merge trend predictions, results='hide'}
+# merge together
+ind_merge <- c(id_var, names(RK_trend_dpm$locn_shp)[!names(RK_trend_dpm$locn_shp) %in% names(field_sample_shp)])
+field_sample_shp <- merge(field_sample_shp,RK_trend_dpm$locn_shp@data[,ind_merge], by = id_var, all.x = T, suffixes = c("",""))
+field_sample_shp <- merge(field_sample_shp,RK_trend_nodpm$locn_shp@data[,ind_merge], by = id_var, all.x = T, suffixes = c("",""))
+field_sample_shp@data <- comb_dup(field_sample_shp@data)
+
+ind_merge <- c(id_var, names(RK_trend_dpm$newdata_shp)[!names(RK_trend_dpm$newdata_shp) %in% names(pred_shp)])
+pred_shp <- merge(pred_shp,RK_trend_dpm$newdata_shp@data[,ind_merge], by = id_var, all.x = T, suffixes = c("",""))
+pred_shp <- merge(pred_shp,RK_trend_nodpm$newdata_shp@data[,ind_merge], by = id_var, all.x = T, suffixes = c("",""))
+pred_shp@data <- comb_dup(pred_shp@data)
+```
+
+We therefore merge these two trends together:
+```{r merging trends plot, fig.fullwidth = T, fig.align='center', echo=F, results='hide', out.width='80%'}
+# turn outputs from RK_LS_trend into rasters
+gridded(RK_trend_dpm$newdata_shp) = T
+trend_DPM_rast <- raster::brick(RK_trend_dpm$newdata_shp)
+gridded(RK_trend_nodpm$newdata_shp) = T
+trend_noDPM_rast <- raster::brick(RK_trend_nodpm$newdata_shp)
+
+# plot trend for DPM
+p.trendDPM <- plot_raster_nepal(trend_DPM_rast$trnd_OLS, scale_legend = F, base_size = 10,legend_title = "Mean Damage Grade") + labs(title = "Trend with DPM")
+# plot trend for no DPM
+p.trendnoDPM <- plot_raster_nepal(trend_noDPM_rast$trnd_OLS, scale_legend = F, base_size = 10,legend_title = "Mean Damage Grade") + labs(title = "Trend without DPM")
+
+# plot all maps together
+pl <- list(p.trendDPM, p.trendnoDPM)
+grid.arrange(grobs = lapply(pl, "+", theme(plot.margin = unit(c(10,10,10,10), "points"))), ncol = 2, nrow = 1)
+```
+
+We also identify the trend model from `RK_LS_trend` the resulted in the lowest RMSE's and assign its estimated trend and residuals to two new variables in `pred_shp` and `field_sample_shp`
+
+- `trnd_RKfin` = the final trend estimate 
+- `trnd_RKfin_var`  = the final variance of that trend estimate
+
+In addition, we assign the residuals of the estimated trend and the true damage in `field_sample_shp` as `trnd_resid_fin`.
+
+```{r calculate residuals}
+# choose best trend model, and redevelop variogram for those residuals for all areas
+pred_shp$trnd_RKfin <- NA; field_sample_shp$trnd_RKfin <- NA
+#for DPM areas
+if(RK_trend_dpm$RMSE$model[which.min(RK_trend_dpm$RMSE$RMSE)] %in% "trnd_GLS"){
+  pred_shp@data[ind_dpm,"trnd_RKfin"] <- pred_shp@data[ind_dpm,"trnd_GLS"];
+  field_sample_shp@data[ind_dpm_field,"trnd_resid_fin"] = field_sample_shp@data[ind_dpm_field, "trnd_resid_GLS"]
+  pred_shp@data[ind_dpm,"trnd_RKfin_var"]  <- pred_shp@data[ind_dpm,"trnd_GLS_var"]
+}else{
+  pred_shp@data[ind_dpm,"trnd_RKfin"] <- pred_shp@data[ind_dpm,"trnd_OLS"];
+  field_sample_shp@data[ind_dpm_field,"trnd_resid_fin"] = field_sample_shp@data[ind_dpm_field, "trnd_resid_OLS"]
+  pred_shp@data[ind_dpm,"trnd_RKfin_var"]  <- pred_shp@data[ind_dpm,"trnd_OLS_var"]
+}
+#for no DPM areas
+if(RK_trend_nodpm$RMSE$model[which.min(RK_trend_nodpm$RMSE$RMSE)] %in% "trnd_GLS"){
+  pred_shp@data[ind_nodpm,"trnd_RKfin"] <- pred_shp@data[ind_nodpm,"trnd_GLS"];
+  field_sample_shp@data[ind_nodpm_field,"trnd_resid_fin"] = field_sample_shp@data[ind_nodpm_field, "trnd_resid_GLS"]
+  pred_shp@data[ind_nodpm,"trnd_RKfin_var"]  <- pred_shp@data[ind_nodpm,"trnd_GLS_var"]
+}else{
+  pred_shp@data[ind_nodpm,"trnd_RKfin"] <- pred_shp@data[ind_nodpm,"trnd_OLS"];
+  field_sample_shp@data[ind_nodpm_field,"trnd_resid_fin"] = field_sample_shp@data[ind_nodpm_field, "trnd_resid_OLS"]
+  pred_shp@data[ind_nodpm,"trnd_RKfin_var"]  <- pred_shp@data[ind_nodpm,"trnd_OLS_var"]
+}
+```
+
+
+## Spatial Correlation model
+Now that we have the residuals at the field locations, we can estimate the residuals at all other locations. 
+### Fit variogram
+We do this by first developing a variogram. Here we fit the best of a Matern, Exponential, or Spherical variogram using the package `autofit`. 
+
+*Note that in this figure we show the Matern variogram in projected coordinates so distances are in km and with kappa = 0.5, which forces the variogram to be exponential*
+```{r develop variogram for plotting}
+# define projection
+PCRS <- "+proj=utm +zone=45 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
+# residual variogram (projected, so units are in km)
+resid.vgm <-automap::autofitVariogram(formula = trnd_resid_fin~1,
+                                      input_data = spTransform(field_sample_shp[,"trnd_resid_fin"], CRS(PCRS)),
+                                      model = c("Mat"), #
+                                      verbose = F,
+                                      kappa = 0.5,
+                                      # kappa = c(0.05, seq(0.2, 2, 0.1)),
+                                      miscFitOptions = list(merge.small.bins = FALSE))
+orig.vgm <-automap::autofitVariogram(formula = GT_OUT~1,
+                                      input_data = spTransform(field_sample_shp, CRS(PCRS)),
+                                      model = c("Mat"), 
+                                      kappa = 0.5,
+                                      verbose = F)
+```
+
+```{r plotting variogram, echo= F,fig.align='center', fig.asp=0.6, out.width='40%'}
+# Create data frame for theoretical variogram
+c0 = resid.vgm$var_model$psill[which(RK_trend$vgm$var_model$model %in% "Nug")]
+c0_field = orig.vgm$var_model$psill[which(RK_trend$vgm$var_model$model %in% "Nug")]
+
+# c1 = sum(resid.vgm$var_model$psill)
+# h = seq(0, max(resid.vgm$exp_var$dist), by = 1)
+# k = resid.vgm$var_model$kappa[which(resid.vgm$var_model$model %in% "Exp")]
+r =resid.vgm$var_model$range[which(resid.vgm$var_model$model %in% "Mat")]
+
+p.vario <- plot_vario(variomod_trend = orig.vgm, 
+                      variomod_detrend = resid.vgm, 
+                      c0_trend = c0_field, c0_detrend = c0, r_detrend = r,
+                      names_vario = c("True damage", "Residuals"))
+p.vario
+```
+
+### Krige residuals
+Once we fit the variogram, we can estimate the residuals at all locations using the function `OK_parallel` which relies on the packages `gstat` to perform kriging. To speed up computation, we perform local kriging by setting the maximum range of spatial correlation to consider (here it is 2 times the range, as defined in [Section 2.1](#parameters) ) or the maximum number of points to consider. For more information see the `gstat` package. We also perform the kriging in parallel, which is only helpful when you have multiple cores or a really large prediction data frame. We can confirm that we kriged the dataframe in parallel, because it outputs the following `r detectCores()-1` times:
+
+```{r krige residuals}
+# residual variogram in non-transformed coordinates
+resid.vgm <-automap::autofitVariogram(formula = trnd_resid_fin~1,
+                                      input_data = field_sample_shp,
+                                      model = c("Exp", "Sph", "Mat"),
+                                      kappa = c(0.05, seq(0.2, 0.5, 0.1)),
+                                      verbose = F)
+# krige residuals in parallel (this is more worth it if you have more cores or a larger prediction area)
+registerDoFuture()
+plan(list(multiprocess))
+parallelKrige <- OK_parallel(vgm.model = resid.vgm,
+                             locn_shp = field_sample_shp,
+                             newdata_shp = pred_shp,
+                             maxdist.multiplier = maxdist.multiplier,
+                             nmin = nmin, nmax = nmax,
+                             dependent.var = "trnd_resid_fin", 
+                             debuglev = 1,
+                             parallel = T, 
+                             n_cores = (detectCores()-1)) 
+```
+
+We can now add the kriging predictions to `pred_shp` as:
+
+- `resid_pred_OK` = predicted residuals from kriging
+- `resid_var_OK` = variance of the residual prediction from kriging
+
+```{r add kriging pred}
+# Add kriging results to prediction dataframe
+pred_shp$resid_pred_OK <- parallelKrige$var1.pred
+pred_shp$resid_var_OK <- parallelKrige$var1.var
+```
+
+## Final damage prediction and variance
+Now that we have an estimate for the trend and an estimate for the residuals at all locations, we can sum them together to get the final damage prediction and variance. Therefore we add the following two variables to `pred_shp`
+
+- `RK_pred_fin` = Final damage prediction
+- `RK_var_fin` = Final prediction variance
+
+*Note: We also bound our predictions between 1 and 5, which are the bounds of our target variable, `r target_var`.
+```{r final prediction and variance}
+# Calculate our damage prediction and variance
+pred_shp$RK_pred_fin<- rowSums(pred_shp@data[,c("trnd_RKfin", "resid_pred_OK")], na.rm=TRUE)
+# bounding predictions
+pred_shp$RK_pred_fin <- pred_shp$RK_pred_fin
+pred_shp$RK_pred_fin[pred_shp$RK_pred_fin <=targ_min] <- targ_min
+pred_shp$RK_pred_fin[pred_shp$RK_pred_fin >=targ_max] <- targ_max
+# final variance
+pred_shp$RK_var_fin <- rowSums(pred_shp@data[,c("trnd_RKfin_var", "resid_var_OK")], na.rm=TRUE)
+```
+
+Plotting the two output maps
+```{r plotting outputs, fig.fullwidth = T, fig.align='center', echo=F, results='hide', out.width='80%'}
+gridded(pred_shp) = T
+pred_rast <- raster::brick(pred_shp)
+gridded(alldat_shp) = T
+alldat_rast <- raster::brick(alldat_shp)
+
+field_df <- as.data.frame(polygon2points(field_sample_shp))
+pred_grid_df <- as.data.frame(pred_shp)
+# plot RK pred fin
+p.rkpredfin <- plot_raster_nepal(pred_rast$RK_pred_fin, scale_legend = F, draw_field = T, field_df = field_df,base_size = 7,legend_title = "Mean Damage Grade") + labs(title = "Integrated damage estimate")
+# rk pred var
+quantile.interval = quantile(pred_shp$RK_var_fin, probs=seq(0, 1, by = 1/8), na.rm = T)
+rast <- ratify(cut(pred_rast$RK_var_fin, breaks=quantile.interval, include.lowest = TRUE))
+rast_levels <- as.character(round(quantile.interval,2))
+p.rkvarfin <- plot_raster_nepal(rast)+labs(title = "Estimation variance",draw_field = T, field_df = field_df)+
+  scale_fill_viridis("Variance",na.value = NA, discrete = F, direction = -1, option = "magma",
+                     guide=guide_colourbar(title.position="top"),limits = c(1,9), breaks = seq(1, length(rast_levels), by = 2), 
+                     labels = rast_levels[seq(1,length(rast_levels), by = 2)])+  plotThemeMap(base_size = 7)
+
+# plot all maps together
+pl <- list(p.rkpredfin, p.rkvarfin)
+grid.arrange(grobs = lapply(pl, "+", theme(plot.margin = unit(c(10,10,10,10), "points"))), ncol = 2, nrow = 1)
+```
+
+
+# Validation of results{#validation-link}
+***
+Now that we have the final damage predictions, we'd like to assess how well G-DIF predicts the actual damage. We do this by calculating the error metrics at all *unknown* locations. We do this by using the function `RK_errormet`, which calculates the following:
+
+- `ME` = the mean error
+- `VE` = the variance of the error
+- `MSRE` = the mean squared relative error
+- `MRE` = the mean relative error
+- `VRE` = the variance of the relative error
+- `MSE` = the mean squared error
+- `MAE` = the mean absolute error
+- `G` = the accuracy of the uncertainty as defined by the goodness of an accuracy plot [@Goovaerts2001GeostatisticalScience, @Deutsch1997]
+
+The above prediction results in the following error metrics:
+```{r calc error}
+# Find "unknown locations" - validation set
+ind_field <- which(pred_shp$GRID_ID %in% field_sample_shp$GRID_ID)
+ind_validation <- -ind_field
+# Calculate the error metrics
+errormet <- RK_errormet(newdata_shp = pred_shp,
+                        dependent.var_char = "GT_OUT",
+                        pred.var_char = "RK_pred_fin",
+                        var.var_char = "RK_var_fin",
+                        ind_validation = ind_validation,
+                        error = T,
+                        error_rel = T,
+                        error_sq = T,
+                        error_abs = T,
+                        SDSR = F,
+                        accplot = T,
+                        return_shp = T)
+# this shape has all the error metrics
+pred_shp <- errormet$shp
+# includes a datatable of all error metrics
+errormet$errormet
+```
+
+## Compare G-DIF to engineering forecast
+These error metrics don't necessarily indicate how well G-DIF performs unless we compare to another damage dataset. Here, we compare to the engineering forecast which is an input to G-DIF. Theoretically, G-DIF should be more accurate than the forecast.
+
+In order to compare the two directly, we have to convert the engineering forecast to the same units as the G-DIF prection ( aka mean damage ratio to mean damage grade). We do this by binning the damage ratios according to the damage grades described in @Grunthal1998.
+```{r engineering forecast conversion}
+## convert from mean damage ratio to damage grade 
+pred_shp$ENG_val <- cut(alldat_shp$ENG_mnDR[ind_bldgs], breaks=c(-.0001, .01, .2, .6, .99, 1))
+levels(pred_shp$ENG_val) <- seq(1,5)
+pred_shp$ENG_val <- as.numeric(as.character(pred_shp$ENG_val))
+# calculate the errormetrics for the engineering forecast
+errormet_ENG <- RK_errormet(newdata_shp = pred_shp[,c(id_var, "GT_OUT", "ENG_val")],
+                            dependent.var_char = "GT_OUT",
+                            pred.var_char = "ENG_val",
+                            accplot = F, SDSR = F,
+                            ind_validation = ind_validation, 
+                            return_shp = T)
+# rename outputs
+names(errormet_ENG$shp)<-c(id_var,"GT_OUT","ENG_val","ENG_ERROR","ENG_ERROR_rel","ENG_ERROR_sq","ENG_ERROR_abs")
+# merge with pred_shp
+pred_shp <- merge(pred_shp, errormet_ENG$shp@data[,c(id_var,"ENG_ERROR","ENG_ERROR_sq")], by = id_var, all.x = T)
+```
+
+We therefore compare the true damage, to the integrated damage and the engineering forecast.
+```{r comparing prediction to GT and eng,echo=F, results='hide', out.width='100%'}
+gridded(pred_shp) = T
+pred_rast <- raster::brick(pred_shp)
+# engingeering values
+p.ENGval <- plot_raster_nepal(pred_rast$ENG_val, legend_title = "Mean Damage Grade")+ labs(title = "Engineering forecast")+
+  scale_fill_viridis("Mean Damage Grade",na.value = NA, discrete = F, guide=guide_colourbar(title.position="top"), limits = c(1,5), breaks = seq(1,5))+
+  plotThemeMap(base_size = 7)
+# plot all maps together
+pl <- list(p.GT, p.rkpredfin, p.ENGval)
+grid.arrange(grobs = lapply(pl, "+", theme(plot.margin = unit(c(10,10,10,10), "points"))), ncol = 3, nrow = 1)
+```
+
+The histogram of errors for G-DIF and engineering forecast illuminate how G-DIF performs better (lower mean and standard deviation):  
+```{r plotting single scenario error, out.width='80%'}
+# squared error histogram
+error_df_melt <- reshape2::melt(pred_shp@data[ind_validation,c(id_var, "ERROR", "ENG_ERROR")],id.vars = id_var, variable.name = "Model")
+levels(error_df_melt$Model) <- c("RK","ENG")
+ME = data.frame(RK = errormet$errormet$ME,
+                 ENG = errormet_ENG$errormet$ME)
+ME <- reshape2::melt(ME, variable.name = "Model")
+ME$yend <- c(0.09,0.08)
+  
+VE = data.frame(RK = errormet$errormet$VE,
+                 ENG = errormet_ENG$errormet$VE)
+VE <- reshape2::melt(VE, variable.name = "Model")
+
+VE$value <- sqrt(VE$value)
+VE$x <- ME$value
+VE$xend <- VE$x + VE$value
+VE$y <- c(0.025, 0.015)
+binw <- diff(range(error_df_melt$value))/50
+p.error <- ggplot(dplyr::filter(error_df_melt, Model %in% c("RK", "ENG"))) +
+  geom_histogram(aes(x = value, y=..count../sum(..count..), fill = Model),
+                 position = "identity", binwidth = binw,
+                 alpha = 0.5, na.rm = T)+
+  geom_segment(data = ME, aes(x = value,xend = value, y =0,yend=yend, color = Model)) +
+  geom_segment(data = VE, aes(x = x, xend = xend, y = y, yend = y, color = Model),  lineend = "butt")+
+  labs(x = "Error (predicted - observed)", y = "Fraction of grids") +
+  geom_text(data = ME[1:2,], aes(x = value, y = ME$yend, color = Model), family = "Open Sans",
+            label = c(paste("Mean =", round(ME$value[1],3)),
+              paste("Mean =", round(ME$value[2],3))),
+            hjust = "right", nudge_x = -0.01, size = 3, nudge_y = -0.001)+
+  geom_text(data = VE[1:2,], aes(x = x, y = y, color = Model),family = "Open Sans",
+            label = c(paste("Standard dev. =", round(VE$value[1],3)),
+              paste("Standard dev. =", round(VE$value[2],3))),
+            hjust = "left", vjust = "bottom",size = 3, nudge_y = 0.001, nudge_x = 0.01)+
+  scale_color_manual(guide = "none", values = cols_gdifeng, labels = labs) +
+  scale_fill_manual(labels = labs, values = cols_gdifeng)+
+  scale_x_continuous(expand = c(0, 0), limits = c(-4,4)) + scale_y_continuous(expand = c(0, 0), limits = c(0,0.1))+
+  plotTheme(base_size = 10)+
+  theme(legend.position = c(0.8,0.8), legend.title = element_blank())
+p.error
+```
+
+```{r plotting results from UQ, fig.align='center', echo=F, results='hide', out.width='100%', fig.asp=1.5, eval=F}
+# output from RK on sherlock
+GDIF_runs <- read.csv("data/GDIF_runs.csv")
+head(GDIF_runs)
+GDIF_runs$model <- "RK"
+# plot the mean squared error
+p.MSE_SA <- plot_SA_ridgeline(SA_data = GDIF_runs, xvar_char = "MSE", yvar_char = "nsurvey", error_eng = errormet_ENG$errormet$MSE,
+                  colvar_char = "model", cols = cols_gdifeng, cols_labs = labs, 
+                  x_title = "Mean Squared Error", y_title = expression("Number of field surveyed locations, "~ n[fs]), x_lims = c(0.5, 2.25))
+# plot the mean error
+p.ME_SA <- plot_SA_ridgeline(SA_data = GDIF_runs, xvar_char = "ME", yvar_char = "nsurvey", error_eng = errormet_ENG$errormet$ME,
+                  colvar_char = "model", cols = cols_gdifeng, cols_labs = labs, 
+                  x_title = "Bias (Mean Error)", y_title = expression("Number of field surveyed locations, "~ n[fs]), x_lims = c(-1,1.01))+
+  geom_vline(mapping = aes(xintercept = 0),size = .2, lty = "dotted", color = "black") + theme(legend.position = c(0.8,0.8))
+
+# plot together
+pl <- list(p.MSE_SA, p.ME_SA)
+grid.arrange(grobs = lapply(pl, "+", theme(plot.margin = unit(c(20,20,20,20), "points"))), ncol = 2, nrow = 1)
+```
+
+```{r saving plots, results = 'hide', echo = F, eval=F}
+## CORRELATION MATRIX (figure 4)
+# replot maps of variables for correlation matrix wihtout legend, title, kathmandu
+p.GT <- plot_raster_nepal(alldat_rast$GT_OUT, legend_title = "Mean Damage Grade",line_size = 0.2 ,draw_kathmandu = F,draw_scalebar = F) + theme(legend.position = 'none') 
+lims <- round(range(alldat_shp$ENG_mnDR[-which(alldat_shp$ENG_mnDR == 0)], na.rm = T),2)
+p.ENG <- plot_raster_nepal(alldat_rast$ENG_mnDR, legend_title = "Mean Damage Ratio",line_size = 0.2, scale_legend = T, legend_lims = lims, draw_kathmandu = F,draw_scalebar = F) + theme(legend.position = 'none') 
+p.DPM <- plot_raster_nepal(alldat_rast$DPM_bldg_med, legend_title = "Median DPM Integer",line_size = 0.2, draw_kathmandu = F,draw_scalebar = F) + theme(legend.position = 'none')
+p.MMI <- plot_raster_nepal(alldat_rast$MMI_mn, legend_title = "MMI",line_size = 0.2, draw_kathmandu = F,draw_scalebar = F) + theme(legend.position = 'none')
+p.DEM <- plot_raster_nepal(alldat_rast$DEM_mn, legend_title = "Elevation (m)",line_size = 0.2, draw_kathmandu = F,draw_scalebar = F) + theme(legend.position = 'none') 
+# save maps of variables
+saveplot(plot = p.MMI,width = 1.150, height = 0.921, file_locn = "results/Images/",file_name = paste0("AOI_MMI"))
+saveplot(plot = p.DPM,width = 1.150, height = 0.921, file_locn = "results/Images/",file_name = paste0("AOI_DPM"))
+saveplot(plot = p.DEM,width = 1.150, height = 0.921, file_locn = "results/Images/",file_name = paste0("AOI_DEM"))
+saveplot(plot = p.ENG,width = 1.150, height = 0.921, file_locn = "results/Images/",file_name = paste0("AOI_ENGmnDR"))
+saveplot(plot = p.GT,width = 1.150, height = 0.921, file_locn = "results/Images/",file_name = paste0("AOI_GTmnDG"))
+# save correlation matrix
+ggsave(plot = p.corr,"results/Images/correlationmat_seed977.pdf", width = 6.5, height = 6.5, units = "in",dpi = 600)
+
+## COEFFICIENTS AND VARIOGRAM (figure 5)
+# coefficients
+saveplot(plot = p.coeff,width = 3.25, height = 3, file_locn = "results/Images/", 
+         file_name = paste0("OLStrend_singlescenario_seed977"))
+# variogram
+saveplot(plot = p.vario,width = 3.25, height = 3, file_locn = "results/Images/", 
+         file_name = paste0("MaternVario_singlescenario_seed977"))
+
+## FINAL RESULTS (figure 6)
+# replot maps without titles
+p.rkpredfin <- plot_raster_nepal(pred_rast$RK_pred_fin, scale_legend = F, draw_field = T, field_df = field_df,base_size = 8,legend_title = "Mean Damage Grade")
+p.rkvarfin <- plot_raster_nepal(rast,draw_field = T, field_df = field_df)+
+  scale_fill_viridis("Variance",na.value = NA, discrete = F, direction = -1, option = "magma",
+                     guide=guide_colourbar(title.position="top"),limits = c(1,9), breaks = seq(1, length(rast_levels), by = 2), 
+                     labels = rast_levels[seq(1,length(rast_levels), by = 2)])+  plotThemeMap(base_size = 8)
+p.GT <- plot_raster_nepal(alldat_rast$GT_OUT, legend_title = "Mean Damage Grade",base_size = 8) # field data
+p.ENGval <- plot_raster_nepal(pred_rast$ENG_val, legend_title = "Mean Damage Grade")+ 
+  scale_fill_viridis("Mean Damage Grade",na.value = NA, discrete = F, guide=guide_colourbar(title.position="top"), limits = c(1,5), breaks = seq(1,5))+
+  plotThemeMap(base_size = 8)
+# final damage prediction
+saveplot(plot = p.rkpredfin,width = 3.25, height = 2.6, file_locn = "results/Images/", 
+         file_name = paste0("map_RKpredfin_11dist_singlescenario_seed977"))
+# final variance
+saveplot(plot = p.rkvarfin,width = 3.25, height = 2.6, file_locn = "results/Images/", 
+         file_name = paste0("map_RK_varfin_11dist_singlescenario_seed977"))
+# true damage (full map)
+saveplot(plot = p.GT,width = 3.25, height = 2.6, file_locn = "results/Images/", 
+         file_name = paste0("map_GT_mnDG_11dist"))
+# engineering values in mean damage grade
+saveplot(plot = p.ENGval,width = 3.25, height = 2.6, file_locn = "results/Images/", 
+         file_name = paste0("map_ENGVAL_11dist_singlescenario_seed977"))
+
+##ERROR HISTOGRAM (figure 7)
+saveplot(plot = p.error,width = 6.5, height = 3, file_locn = "results/Images/", 
+         file_name = paste0("hist_error_11dist_singlescenario_seed977"))
+ggsave(plot = p.error,filename =  "results/Images/hist_error_11dist_singlescenario_seed977.pdf", width = 6.5, height = 3, units = "in",dpi = 600)
+## SENSITIVITY ANALYSIS RESULTS (figure 8)
+# # mean squared error
+# saveplot(plot = p.MSE_SA, width = 3.25, height = 2.6, file_locn = "results/Images/",file_name = "MSE_SA")
+# ggsave(plot = p.MSE_SA,filename =  "results/Images/MSE_SA.pdf", width = 3.25, height = 2.6, units = "in",dpi = 600)
+# # mean error
+# saveplot(plot = p.ME_SA, width = 3.25, height = 2.6, file_locn = "results/Images/",file_name = "ME_SA")
+# ggsave(plot = p.ME_SA,filename =  "results/Images/ME_SA.pdf", width = 3.25, height = 2.6, units = "in",dpi = 600)
+```
+
+```{r for saving, echo=F, results='hide'}
+# merge predictions and errors with grid shape (some grids of grid shape willl have no predictions)
+alldat_shp <- merge(alldat_shp, pred_shp@data[,c(id_var, "RK_pred_fin", "RK_var_fin", "ERROR", "ENG_ERROR")], by = id_var, all.x = T)
+# save
+```
+
+# Session Info
+***
+```{r session info}
+devtools::session_info()
+```
+
+# References
+***
+
+
