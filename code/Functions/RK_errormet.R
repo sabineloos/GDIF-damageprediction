@@ -19,6 +19,7 @@
 ## error_abs = T/F calculate the absolute error (e.g. |predicted - observed|)
 ## SDSR = T/F calculate the standard deviation of the standardized residuals
 ## accplot = T/F calculate the accuracy plot and goodness metric G of the uncertainty
+## R_sq = T/F calculate the explained variance (aka the R^2)
 ## return_shp = T/F return newdata_shp with calculated errormetrics
 
 # OUTPUTS: output contains a list that contains:
@@ -38,7 +39,8 @@ RK_errormet <- function(newdata_shp,
                         error_abs = T,
                         SDSR = T,
                         accplot = T, 
-                        return_shp = F){
+                        return_shp = F,
+                        R_sq = T){
   # initialize dataframe to hole error metrics
   errormet <- data.frame(del = NA)
   # calculate the error: predicted - observed
@@ -89,6 +91,9 @@ RK_errormet <- function(newdata_shp,
         a <- ifelse(diff >= 0, 1, -2)
         sig <- a * diff
         return(sig)}, psi = psi_TRUE/100, p = p_RK/100)*(1/length(p_RK)))
+  }
+  if(R_sq == T){
+    errormet$R_sq = var(newdata_shp@data[,pred.var_char], na.rm = T)/var(newdata_shp@data[,dependent.var_char], na.rm = T)
   }
   # return outputs
   ifelse(return_shp==T,return(list(shp = newdata_shp, errormet = errormet[-which(names(errormet) %in% "del")])) ,return(errormet))
