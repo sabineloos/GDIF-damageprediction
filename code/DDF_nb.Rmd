@@ -36,17 +36,21 @@ knitr::opts_chunk$set(warning = F, message = F, dpi = 600, fig.align = 'center')
 # Introduction to the framework and application
 ***
 <br>
-In this notebook, we run through the basic steps to implement the geospatial data integration framework (G-DIF) presented in "A geospatial data integration framework to rapidly estimate post-disaster damage" by Sabine Loos, Jack Baker, David Lallemant, and **sabine add other authors**.  
+In this notebook, we run through the basic steps to implement the geospatial data integration framework (G-DIF) presented in "A geospatial data integration framework to rapidly estimate post-disaster damage" by Sabine Loos , Jack Baker, David Lallemant, Nama Budhathoki, Sang-Ho Yun, Jamie McCaughey, Ritika Singh, and Feroz Khan.  
 
-The **goal** of this paper is to provide a framework to integrate multiple damage data sources that become available after an earthquake, including: field surveys, remote-sensing proxies, engineering forecasts, and other geospatial covariates. More information can be found in the paper, but here is the general flowchart:
+The **goal** of this paper is to provide a framework to integrate multiple damage data sources that become available after an earthquake, including: field surveys, remotely-sensed proxies, engineering forecasts, and other geospatial covariates. More information can be found in the paper, but here is the general flowchart:
 
-```{r flowchart, out.width="70%"}
+```{r flowchart, out.width="70%", echo=F}
 knitr::include_graphics("../results/Images/RK_Framework_simple.png")
 ```
 <br>
+
 ## Packages and functions
+The code for this is split between this main markdown and multiple functions. The entire source code can be found at [https://github.com/sabineloos/GDIF-damageprediction](https://github.com/sabineloos/GDIF-damageprediction). The main packages we use are caret for cross-validation and stepwise selection in the trend model and gstat for kriging of the residuals. Necessary packages to install are also included in `install.R` script.
+
 *This code is specifically meant to show how we develop the framework for the example scenario and dataset presented in the paper, however, it is possible to modify the code with new spatial dataframes for new settings.*
-The code for this is split between this main markdown and multiple functions. The entire source code can be found at [https://github.com/sabineloos/GDIF-damageprediction](https://github.com/sabineloos/GDIF-damageprediction).
+
+
 ```{r Loading packages and functions, collapse=TRUE}
 rm(list=ls(all = T))
 # source("code/install.R") # if you need to install packages uncomment this
@@ -93,8 +97,8 @@ Here, we implement G-DIF with data from the 2015 Nepal earthquake. Our area of i
 
 1. **Field surveys** of impact at the household-level, organized by Nepal's Central Bureau of Statistics and organized by our collaborators at Kathmandu Living Labs. This data has been made openly available in [the 2015 Nepal Earthquake Open Data Portal](http://eq2015.npc.gov.np/#/).
 2. A map of **shaking intensity** from the United States Geological Survey (USGS). This provides the Modified Mercalli Intensity at 1.75 km resolution. This uses the latest ShakeMap (version 4) [@Worden2010, @Worden2016ShakeMapRelease]
-3. A self-developed **engineering forecast** of damage. This uses the USGS shaking intensity + fragility curves from NSET + Landscan population exposure to predict the mean damage ratio at a 1km resolution [@Jarvis2008, @LandScan:2012tj]
-4. A [**damage proxy map (DPM)**](https://aria-share.jpl.nasa.gov/) developed through inSAR-based coherence differencing from the ARIA project at the NASA Jet Propulsion Lab. This provides a damage proxy number from -1 to 1 at 30m resolution [@Yun2015]
+3. A self-developed **engineering forecast** of damage. This uses the USGS shaking intensity + fragility curves from NSET + Landscan population exposure to predict the mean damage ratio at a 1km resolution [@JICA2002, @LandScan:2012tj]
+4. A [**damage proxy map (DPM)**](https://aria-share.jpl.nasa.gov/) developed through inSAR-based coherence differencing from the ARIA project at the NASA Jet Propulsion Lab. This provides a damage proxy value from -1 to 1 at 30m resolution [@Yun2015]
 5. A [**digital elevation model**](https://cgiarcsi.community/data/srtm-90m-digital-elevation-database-v4-1/) from CGIAR Consortium for Spatial Information. This provides the elevation at a 90 m resolution. [@Jarvis2008]
 
 We convert each dataset to the same support and load as one spatial dataframe (**alldat_shp**) before inputting in the framework. The format is a gridded dataframe at a resolution of .0028$^\circ$ $\times$ .0028$^\circ$ (~290m $\times$ 290m). The variables in the dataframe are:
@@ -110,7 +114,7 @@ We convert each dataset to the same support and load as one spatial dataframe (*
 ```{r Loading dataframes}
 # Load data frame that has been prepared for the framework
 alldat_shp <- readRDS(file = "data/Nepal_11dist_damagedata_grids.rds")
-alldat_shp@data[1:5,]
+head(alldat_shp@data[which(!is.na(alldat_shp$DPM_bldg_med)),])
 ```
 
 ```{r Mapping variables, echo=FALSE, out.width='100%', fig.show = 'hold'}
@@ -141,7 +145,7 @@ if(class(alldat_shp) != "SpatialPointsDataFrame"){# check if already a spatial p
 
 ## Define modeling parameters and dataframes{#parameters}
 In order to model, we need to know what we are predicting, what we use to predict, and how many data points we have.
-
+**The user needs to define the below variables**
 ```{r define modeling parameters}
 # DEFINE the target (or output) variable and create a new column called GT_OUT. 
 target_var = c("GT_mnDG")
@@ -177,7 +181,7 @@ targ_max <- max(alldat_shp$GT_OUT, na.rm = T)
 - `seed` = the random seed we use for reproducibility. Here we use `r seed`, which is the area code for Kathmandu :)
 - `id_var` = ID variable
 - `maxdist.multiplier` = For the spatial correlation model, we krige the residuals only using points within `r maxdist.multiplier` times the spatial correlation range of a point
-- `nmin` and `nmax` = Fpr the spatial correlation model, the minimum and maximum number of points to consider as an alternative to `maxidst.multiplier`
+- `nmin` and `nmax` = For the spatial correlation model, the minimum and maximum number of points to consider as an alternative to `maxidst.multiplier`
 
 ```{r finding areas with dpm}
 # grids with buildings
@@ -237,13 +241,14 @@ plot_points_nepal(field_df, color = in_DPM)+
 Ideally, we would like to see a relationship between our target variable, `r target_var` and the secondary variables. We would also want our field survey sample to decently match the distributions from the data from all locations. We can verify this using the following correlation matrix.
 
 ```{r make correlation matrix, echo = F}
+set.seed(977)
 # make dataframe with full dataset and field in one
 pred_df <- alldat_shp@data[ind_bldgs,append("GT_OUT", seconddat_vars)]
 field_df <-alldat_shp@data[ind_bldgs[ind_field],append("GT_OUT", seconddat_vars)]
 pred_df$locns <- factor("All locations"); field_df$locns <- factor("Field surveyed locations")
 comb_wide <- rbind(pred_df[sample(nrow(pred_df), 10000, replace = F),], field_df)
 leg <- ggplot(comb_wide) + geom_histogram(aes(GT_OUT, fill = locns)) +
-  scale_fill_manual("", values = cols)+theme(legend.direction = "vertical", legend.spacing = unit(0.05, "cm"),text = element_text(colour = "grey30", family = "Open Sans"))
+  scale_fill_manual("", values = cols)+theme(legend.direction = "vertical", legend.spacing = unit(0.05, "cm"),text = element_text(colour = "grey30", family = "Open Sans", size = 9))
 comb_wide$GT_OUT <- as.vector(comb_wide$GT_OUT)
 # correlation matrix
 p.corr <- ggpairs(dplyr::filter(comb_wide, ENG_mnDR > 0),columns = 1:5,
@@ -252,13 +257,14 @@ p.corr <- ggpairs(dplyr::filter(comb_wide, ENG_mnDR > 0),columns = 1:5,
              upper = list(continuous = gglegend("points")),
              diag = list(continuous = wrap(my_fn_diag,
                                            dens = list(aes(fill = locns, y = ..density..),
-                                                       bins = 20,position = "identity",colour = "transparent", alpha = 0.75))),
+                                                       bins = 20,position = "identity",colour = "transparent", alpha = 0.65))),
              lower = list(continuous = wrap(my_fn,
                                             pts=list(data = dplyr::filter(comb_wide[append(sample(10000, 1000,replace = F),10000:10100),], 
                                                                           ENG_mnDR >0),shape = ".",alpha = 0.5 ,aes(colour=locns)), 
                                             smt=list(method="loess", se=F, size=1, aes(colour = locns)))),
-             columnLabels = c("True damage","Eng. forecast", "Damage proxy map", "Shaking intensity", "Elevation"))+
-  theme_minimal()+theme(panel.grid = element_blank(),text = element_text(colour = "grey30", family = "Open Sans"),
+             columnLabels = c("True damage","Eng. forecast", "Damage proxy map", "Shaking intensity", "Elevation")
+             )+
+  theme_minimal()+theme(panel.grid = element_blank(),text = element_text(colour = "grey30", family = "Open Sans", size = 9),
                         legend.position = "bottom")
 ```
 
@@ -316,11 +322,16 @@ RK_trend$se$ols.coeff
 ```
 
 ```{r coefficient plots for DPM, echo= F, fig.align='center', fig.asp = 0.6, out.width='60%'}
-# plot beta and standard error for trend model with DPM
-p.coeff <- plot_coeff(var_vec = names(RK_trend$se$ols.coeff),
-           coeff_vec = RK_trend$se$ols.coeff,
-           se_vec = RK_trend$se$ols,
-           names_vec = c('Intercept','Eng. forecast',"Damage proxy map", 'Shaking intensity','Elevation'),
+# load coefficients and variogram for true data (optional)
+load("data/truemodels_10000surveys_081919.rdata")
+
+# plot beta and standard error for trend model with DPM (removing the intercept)
+p.coeff <- plot_coeff(var_vec = names(RK_trend$se$ols.coeff)[2:5],
+           coeff_vec = RK_trend$se$ols.coeff[2:5],
+           se_vec = RK_trend$se$ols[2:5],
+           names_vec = c('Eng. forecast',"Damage proxy map", 'Shaking intensity','Elevation'),
+           plot_true = T,
+           truecoeff_vec = RK_trend_true$se$ols.coeff[2:5],
            var_color = GDIF_col)
 p.coeff
 ```
@@ -348,10 +359,12 @@ The coefficients for this trend are quite different (we only include the first i
 
 ```{r coefficient plots for without DPM, echo= F,fig.align='center', fig.asp = 0.6, out.width='60%'}
 # plot beta and standard error for trend model with DPM
-plot_coeff(var_vec = names(RK_trend_nodpm$se$ols.coeff),
-           coeff_vec = RK_trend_nodpm$se$ols.coeff,
-           se_vec = RK_trend_nodpm$se$ols,
-           names_vec = c('Intercept', 'Shaking intensity','Eng. forecast','Elevation'),
+plot_coeff(var_vec = names(RK_trend_nodpm$se$ols.coeff)[2:4],
+           coeff_vec = RK_trend_nodpm$se$ols.coeff[2:4],
+           se_vec = RK_trend_nodpm$se$ols[2:4],
+           names_vec = c('Shaking intensity','Eng. forecast','Elevation'),
+           plot_true = T,
+           truecoeff_vec = RK_trendnodpm_true$se$ols.coeff[2:4],
            var_color = GDIF_col)
 ```
 
@@ -435,32 +448,36 @@ PCRS <- "+proj=utm +zone=45 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
 resid.vgm <-automap::autofitVariogram(formula = trnd_resid_fin~1,
                                       input_data = spTransform(field_sample_shp[,"trnd_resid_fin"], CRS(PCRS)),
                                       model = c("Mat"), #
-                                      verbose = F,
+                                      verbose = T,
                                       kappa = 0.5,
                                       # kappa = c(0.05, seq(0.2, 2, 0.1)),
-                                      miscFitOptions = list(merge.small.bins = FALSE))
+                                      miscFitOptions = list(merge.small.bins = F))
 orig.vgm <-automap::autofitVariogram(formula = GT_OUT~1,
                                       input_data = spTransform(field_sample_shp, CRS(PCRS)),
                                       model = c("Mat"), 
                                       kappa = 0.5,
-                                      verbose = F)
+                                      verbose = F,
+                                     miscFitOptions = list(merge.small.bins = F))
 ```
-
+We plot our fitted variogram with the 100 sampled points and compare to the "true" variogram developed using 10,000 points.
 ```{r plotting variogram, echo= F,fig.align='center', fig.asp=0.6, out.width='40%'}
 # Create data frame for theoretical variogram
-c0 = resid.vgm$var_model$psill[which(RK_trend$vgm$var_model$model %in% "Nug")]
-c0_field = orig.vgm$var_model$psill[which(RK_trend$vgm$var_model$model %in% "Nug")]
+c0 = resid.vgm$var_model$psill[1]
+c0_field = orig.vgm$var_model$psill[1]
+r =resid.vgm$var_model$range[2]
 
-# c1 = sum(resid.vgm$var_model$psill)
-# h = seq(0, max(resid.vgm$exp_var$dist), by = 1)
-# k = resid.vgm$var_model$kappa[which(resid.vgm$var_model$model %in% "Exp")]
-r =resid.vgm$var_model$range[which(resid.vgm$var_model$model %in% "Mat")]
-
+# variogram to save
 p.vario <- plot_vario(variomod_trend = orig.vgm, 
                       variomod_detrend = resid.vgm, 
-                      c0_trend = c0_field, c0_detrend = c0, r_detrend = r,
+                      plot_true = F, 
+                      variotrue = resid.vgm_true,
                       names_vario = c("True damage", "Residuals"))
-p.vario
+# variogram with true variogram
+plot_vario(variomod_trend = orig.vgm, 
+                      variomod_detrend = resid.vgm, 
+                      plot_true = T, 
+                      variotrue = resid.vgm_true,
+                      names_vario = c("True damage", "Residuals"))
 ```
 
 ### Krige residuals
@@ -470,9 +487,10 @@ Once we fit the variogram, we can estimate the residuals at all locations using 
 # residual variogram in non-transformed coordinates
 resid.vgm <-automap::autofitVariogram(formula = trnd_resid_fin~1,
                                       input_data = field_sample_shp,
-                                      model = c("Exp", "Sph", "Mat"),
+                                      model = c("Exp", "Ste", "Mat"),
                                       kappa = c(0.05, seq(0.2, 0.5, 0.1)),
-                                      verbose = F)
+                                      verbose = F,
+                                      miscFitOptions = list(merge.small.bins = F))
 # krige residuals in parallel (this is more worth it if you have more cores or a larger prediction area)
 registerDoFuture()
 plan(list(multiprocess))
@@ -509,14 +527,12 @@ Now that we have an estimate for the trend and an estimate for the residuals at 
 # Calculate our damage prediction and variance
 pred_shp$RK_pred_fin<- rowSums(pred_shp@data[,c("trnd_RKfin", "resid_pred_OK")], na.rm=TRUE)
 # bounding predictions
-pred_shp$RK_pred_fin <- pred_shp$RK_pred_fin
 pred_shp$RK_pred_fin[pred_shp$RK_pred_fin <=targ_min] <- targ_min
 pred_shp$RK_pred_fin[pred_shp$RK_pred_fin >=targ_max] <- targ_max
 # final variance
 pred_shp$RK_var_fin <- rowSums(pred_shp@data[,c("trnd_RKfin_var", "resid_var_OK")], na.rm=TRUE)
 ```
 
-Plotting the two output maps
 ```{r plotting outputs, fig.fullwidth = T, fig.align='center', echo=F, results='hide', out.width='80%'}
 gridded(pred_shp) = T
 pred_rast <- raster::brick(pred_shp)
@@ -558,7 +574,7 @@ Now that we have the final damage predictions, we'd like to assess how well G-DI
 The above prediction results in the following error metrics:
 ```{r calc error}
 # Find "unknown locations" - validation set
-ind_field <- which(pred_shp$GRID_ID %in% field_sample_shp$GRID_ID)
+ind_field <- which(pred_shp@data[,id_var] %in% field_sample_shp@data[,id_var])
 ind_validation <- -ind_field
 # Calculate the error metrics
 errormet <- RK_errormet(newdata_shp = pred_shp,
@@ -615,7 +631,7 @@ grid.arrange(grobs = lapply(pl, "+", theme(plot.margin = unit(c(10,10,10,10), "p
 ```
 
 The histogram of errors for G-DIF and engineering forecast illuminate how G-DIF performs better (lower mean and standard deviation):  
-```{r plotting single scenario error, out.width='80%'}
+```{r plotting single scenario error, out.width='80%',echo=F, results='hide'}
 # squared error histogram
 error_df_melt <- reshape2::melt(pred_shp@data[ind_validation,c(id_var, "ERROR", "ENG_ERROR")],id.vars = id_var, variable.name = "Model")
 levels(error_df_melt$Model) <- c("RK","ENG")
@@ -641,13 +657,13 @@ p.error <- ggplot(dplyr::filter(error_df_melt, Model %in% c("RK", "ENG"))) +
   geom_segment(data = VE, aes(x = x, xend = xend, y = y, yend = y, color = Model),  lineend = "butt")+
   labs(x = "Error (predicted - observed)", y = "Fraction of grids") +
   geom_text(data = ME[1:2,], aes(x = value, y = ME$yend, color = Model), family = "Open Sans",
-            label = c(paste("Mean =", round(ME$value[1],3)),
-              paste("Mean =", round(ME$value[2],3))),
-            hjust = "right", nudge_x = -0.01, size = 3, nudge_y = -0.001)+
+            label = c(paste("Bias = ", round(ME$value[1],3)),
+              paste("Bias = ", round(ME$value[2],3))),
+            hjust = "right", nudge_x = -0.01, size = 2, nudge_y = -0.001)+
   geom_text(data = VE[1:2,], aes(x = x, y = y, color = Model),family = "Open Sans",
-            label = c(paste("Standard dev. =", round(VE$value[1],3)),
-              paste("Standard dev. =", round(VE$value[2],3))),
-            hjust = "left", vjust = "bottom",size = 3, nudge_y = 0.001, nudge_x = 0.01)+
+            label = c(paste("S. dev. = ", round(VE$value[1],3)),
+              paste("S. dev. = ", round(VE$value[2],3))),
+            hjust = "left", vjust = "bottom",size = 2, nudge_y = 0.001, nudge_x = 0.01)+
   scale_color_manual(guide = "none", values = cols_gdifeng, labels = labs) +
   scale_fill_manual(labels = labs, values = cols_gdifeng)+
   scale_x_continuous(expand = c(0, 0), limits = c(-4,4)) + scale_y_continuous(expand = c(0, 0), limits = c(0,0.1))+
@@ -656,25 +672,205 @@ p.error <- ggplot(dplyr::filter(error_df_melt, Model %in% c("RK", "ENG"))) +
 p.error
 ```
 
-```{r plotting results from UQ, fig.align='center', echo=F, results='hide', out.width='100%', fig.asp=1.5, eval=F}
+## For one district
+The error histogram can look quite different depending on the spatial scale at which we validate the framework. G-DIF's advantage is that it will provide a locally calibrated damage estimate, dependent on the field surveys available within in a district. Therefore, we assess the errors at individual districts.
+```{r add districts to dataframe, echo=F, results='hide'}
+over <- over(polygon2points(pred_shp), dist11_shp, minDimension = 0)
+pred_shp <- maptools::spCbind(pred_shp, over$DNAME)
+```
+First, we assess the errors at **Nuwakot**, the district directly northeast of Kathmandu Valley. We can see the engineering forecast is slightly more biased than G-DIF here, because Nuwakot experienced very high rates of collapse.
+```{r nuwakot, echo = F, results= 'hide'}
+ind_nuw <- which(pred_shp$over.DNAME %in% "NUWAKOT")
+error_df_melt2 <- reshape2::melt(pred_shp@data[ind_nuw,c(id_var, "ERROR", "ENG_ERROR")],id.vars = id_var, variable.name = "Model")
+levels(error_df_melt2$Model) <- c("RK","ENG")
+nuw_error <- RK_errormet(newdata_shp = pred_shp[ind_nuw,c(id_var, "GT_OUT", "RK_pred_fin")],
+                            dependent.var_char = "GT_OUT",
+                            pred.var_char = "RK_pred_fin",
+                            accplot = F, SDSR = F,
+                            ind_validation = ind_validation, 
+                            return_shp = F)
+nuw_error_ENG <- RK_errormet(newdata_shp = pred_shp[ind_nuw,c(id_var, "GT_OUT", "ENG_val")],
+                            dependent.var_char = "GT_OUT",
+                            pred.var_char = "ENG_val",
+                            accplot = F, SDSR = F,
+                            ind_validation = ind_validation, 
+                            return_shp = F)
+ME = data.frame(RK = nuw_error$ME,
+                 ENG = nuw_error_ENG$ME)
+ME <- reshape2::melt(ME, variable.name = "Model")
+ME$yend <- c(0.09,0.08)
+  
+VE = data.frame(RK = nuw_error$VE,
+                 ENG = nuw_error_ENG$VE)
+VE <- reshape2::melt(VE, variable.name = "Model")
+
+VE$value <- sqrt(VE$value)
+VE$x <- ME$value
+VE$xend <- VE$x + VE$value
+VE$y <- c(0.025, 0.015)
+binw <- diff(range(error_df_melt2$value))/50
+
+p.error_nuw <- ggplot(dplyr::filter(error_df_melt2, Model %in% c("RK", "ENG"))) +
+  geom_histogram(aes(x = value, y=..count../sum(..count..), fill = Model),
+                 position = "identity", binwidth = binw,
+                 alpha = 0.5, na.rm = T)+
+  geom_segment(data = ME, aes(x = value,xend = value, y =0,yend=yend, color = Model)) +
+  geom_segment(data = VE, aes(x = x, xend = xend, y = y, yend = y, color = Model),  lineend = "butt")+
+  labs(x = "Error (predicted - observed)", y = "Fraction of grids") +
+  geom_text(data = ME[1:2,], aes(x = value, y = ME$yend, color = Model), family = "Open Sans",
+            label = c(paste("Bias = ", round(ME$value[1],3)),
+              paste("Bias = ", round(ME$value[2],3))),
+            hjust = "right", nudge_x = -0.01, size = 2, nudge_y = -0.001)+
+  geom_text(data = VE[1:2,], aes(x = x, y = y, color = Model),family = "Open Sans",
+            label = c(paste("S. dev. = ", round(VE$value[1],3)),
+              paste("S. dev. = ", round(VE$value[2],3))),
+            hjust = "left", vjust = "bottom",size = 2, nudge_y = 0.001, nudge_x = 0.01)+
+  scale_color_manual(guide = "none", values = cols_gdifeng, labels = labs) +
+  scale_fill_manual(guide = "none", labels = labs, values = cols_gdifeng)+
+  scale_x_continuous(expand = c(0, 0), limits = c(-4,4)) + scale_y_continuous(expand = c(0, 0), limits = c(0,0.1))+
+  plotTheme(base_size = 10)+
+  theme(legend.position = c(0.8,0.8), legend.title = element_blank())
+p.error_nuw
+```
+Conversely, the errors at **Makawanpur**, the district directly southwest of Kathmandu Valley did not experience as severe damage. We can see here that the engineering forecast is overestimates damage compared to G-DIF.
+```{r makawanpur, echo = F, results= 'hide'}
+ind_mak <- which(pred_shp$over.DNAME %in% "MAKAWANPUR")
+error_df_melt2 <- reshape2::melt(pred_shp@data[ind_mak,c(id_var, "ERROR", "ENG_ERROR")],id.vars = id_var, variable.name = "Model")
+levels(error_df_melt2$Model) <- c("RK","ENG")
+mak_error <- RK_errormet(newdata_shp = pred_shp[ind_mak,c(id_var, "GT_OUT", "RK_pred_fin")],
+                            dependent.var_char = "GT_OUT",
+                            pred.var_char = "RK_pred_fin",
+                            accplot = F, SDSR = F,
+                            ind_validation = ind_validation, 
+                            return_shp = F)
+mak_error_ENG <- RK_errormet(newdata_shp = pred_shp[ind_mak,c(id_var, "GT_OUT", "ENG_val")],
+                            dependent.var_char = "GT_OUT",
+                            pred.var_char = "ENG_val",
+                            accplot = F, SDSR = F,
+                            ind_validation = ind_validation, 
+                            return_shp = F)
+ME = data.frame(RK = mak_error$ME,
+                 ENG = mak_error_ENG$ME)
+ME <- reshape2::melt(ME, variable.name = "Model")
+ME$yend <- c(0.09,0.08)
+  
+VE = data.frame(RK = mak_error$VE,
+                 ENG = mak_error_ENG$VE)
+VE <- reshape2::melt(VE, variable.name = "Model")
+
+VE$value <- sqrt(VE$value)
+VE$x <- ME$value
+VE$xend <- VE$x + VE$value
+VE$y <- c(0.025, 0.015)
+binw <- diff(range(error_df_melt2$value))/50
+
+p.error_mak <- ggplot(dplyr::filter(error_df_melt2, Model %in% c("RK", "ENG"))) +
+  geom_histogram(aes(x = value, y=..count../sum(..count..), fill = Model),
+                 position = "identity", binwidth = binw,
+                 alpha = 0.5, na.rm = T)+
+  geom_segment(data = ME, aes(x = value,xend = value, y =0,yend=yend, color = Model)) +
+  geom_segment(data = VE, aes(x = x, xend = xend, y = y, yend = y, color = Model),  lineend = "butt")+
+  labs(x = "Error (predicted - observed)", y = "Fraction of grids") +
+  geom_text(data = ME[1:2,], aes(x = value, y = ME$yend, color = Model), family = "Open Sans",
+            label = c(paste("Bias = ", round(ME$value[1],3)),
+              paste("Bias = ", round(ME$value[2],3))),
+            hjust = "right", nudge_x = -0.01, size = 2, nudge_y = -0.001)+
+  geom_text(data = VE[1:2,], aes(x = x, y = y, color = Model),family = "Open Sans",
+            label = c(paste("S. dev. = ", round(VE$value[1],3)),
+              paste("S. dev. = ", round(VE$value[2],3))),
+            hjust = "left", vjust = "bottom",size = 2, nudge_y = 0.001, nudge_x = 0.01)+
+  scale_color_manual(guide = "none", values = cols_gdifeng, labels = labs) +
+  scale_fill_manual(guide = "none",labels = labs, values = cols_gdifeng)+
+  scale_x_continuous(expand = c(0, 0), limits = c(-4,4)) + scale_y_continuous(expand = c(0, 0), limits = c(0,0.1))+
+  plotTheme(base_size = 10)+
+  theme(legend.position = c(0.8,0.8), legend.title = element_blank())
+
+p.error_mak
+```
+
+For all but two districts, G-DIF performs better. These other two districts are only slightly different and highlight the importance of where we sample the field surveys.
+```{r all districts, echo = F, results= 'hide', out.width='100%', fig.height=10}
+# plot together
+pl <- list()
+for (i in seq_along(unique(dist11_shp$DNAME))) {
+  ind <- which(pred_shp$over.DNAME %in% unique(dist11_shp$DNAME)[i])
+  error_df_melt2 <- reshape2::melt(pred_shp@data[ind,c(id_var, "ERROR", "ENG_ERROR")],id.vars = id_var, variable.name = "Model")
+  levels(error_df_melt2$Model) <- c("RK","ENG")
+  dist_error <- RK_errormet(newdata_shp = pred_shp[ind,c(id_var, "GT_OUT", "RK_pred_fin")],
+                              dependent.var_char = "GT_OUT",
+                              pred.var_char = "RK_pred_fin",
+                              accplot = F, SDSR = F,
+                              ind_validation = ind_validation, 
+                              return_shp = F)
+  dist_error_ENG <- RK_errormet(newdata_shp = pred_shp[ind,c(id_var, "GT_OUT", "ENG_val")],
+                              dependent.var_char = "GT_OUT",
+                              pred.var_char = "ENG_val",
+                              accplot = F, SDSR = F,
+                              ind_validation = ind_validation, 
+                              return_shp = F)
+  ME = data.frame(RK = dist_error$ME,
+                   ENG = dist_error_ENG$ME)
+  ME <- reshape2::melt(ME, variable.name = "Model")
+  ME$yend <- c(0.09,0.08)
+    
+  VE = data.frame(RK = dist_error$VE,
+                   ENG = dist_error_ENG$VE)
+  VE <- reshape2::melt(VE, variable.name = "Model")
+  
+  VE$value <- sqrt(VE$value)
+  VE$x <- ME$value
+  VE$xend <- VE$x + VE$value
+  VE$y <- c(0.025, 0.015)
+  binw <- diff(range(error_df_melt2$value))/50
+  pl[[i]] <- ggplot(dplyr::filter(error_df_melt2, Model %in% c("RK", "ENG"))) +
+    geom_histogram(aes(x = value, y=..count../sum(..count..), fill = Model),
+                   position = "identity", binwidth = binw,
+                   alpha = 0.5, na.rm = T)+
+    geom_segment(data = ME, aes(x = value,xend = value, y =0,yend=yend, color = Model)) +
+    geom_segment(data = VE, aes(x = x, xend = xend, y = y, yend = y, color = Model),  lineend = "butt")+
+    geom_text(data = ME[1:2,], aes(x = value, y = ME$yend, color = Model), family = "Open Sans",
+              label = c(paste("Bias = ", round(ME$value[1],3)),
+                paste("Bias = ", round(ME$value[2],3))),
+              hjust = "right", nudge_x = -0.01, size = 2, nudge_y = -0.001)+
+    geom_text(data = VE[1:2,], aes(x = x, y = y, color = Model),family = "Open Sans",
+              label = c(paste("S. dev. = ", round(VE$value[1],3)),
+                paste("S. dev. = ", round(VE$value[2],3))),
+              hjust = "left", vjust = "bottom",size = 2, nudge_y = 0.001, nudge_x = 0.01)+
+    scale_color_manual(guide = "none", values = cols_gdifeng, labels = labs) +
+    scale_fill_manual(guide = "none",labels = labs, values = cols_gdifeng)+
+    scale_x_continuous(expand = c(0, 0), limits = c(-4,4)) + scale_y_continuous(expand = c(0, 0), limits = c(0,0.1))+
+    plotTheme(base_size = 10)+
+    labs(title = unique(dist11_shp$DNAME)[i])+
+    theme(legend.position = c(0.8,0.8), legend.title = element_blank(), axis.text = element_blank(), axis.title.x = element_blank(), axis.title.y = element_blank())
+}
+
+grid.arrange(grobs = lapply(pl, "+", theme(plot.margin = unit(c(10,10,10,10), "points"))), ncol = 3, nrow = 4)
+```
+
+## Sensitivity to number of field surveys
+Since the results of G-DIF depend on the number and locations of field surveys, we run a sensitivity analysis using different numbers and placements of the field surveys for training data. We discuss these results further in the paper, but it is plain to tell that G-DIF performs better both in terms of MSE and ME with more field surveys.
+```{r plotting results from UQ, fig.align='center', echo=F, out.width='100%', fig.asp=0.5}
 # output from RK on sherlock
 GDIF_runs <- read.csv("data/GDIF_runs.csv")
 head(GDIF_runs)
 GDIF_runs$model <- "RK"
 # plot the mean squared error
-p.MSE_SA <- plot_SA_ridgeline(SA_data = GDIF_runs, xvar_char = "MSE", yvar_char = "nsurvey", error_eng = errormet_ENG$errormet$MSE,
-                  colvar_char = "model", cols = cols_gdifeng, cols_labs = labs, 
-                  x_title = "Mean Squared Error", y_title = expression("Number of field surveyed locations, "~ n[fs]), x_lims = c(0.5, 2.25))
+p.MSE_SA <- plot_SA_ridgeline(SA_data = GDIF_runs, xvar_char = "MSE", yvar_char = "nsurvey", error_eng = 
+                                errormet_ENG$errormet$MSE,
+                  colvar_char = "model", cols = cols_gdifeng, cols_labs = labs,
+                  x_title = "Mean Squared Error", y_title = expression("Number of field surveyed locations, "~ n[fs]), x_lims = c(0, 3)) 
 # plot the mean error
 p.ME_SA <- plot_SA_ridgeline(SA_data = GDIF_runs, xvar_char = "ME", yvar_char = "nsurvey", error_eng = errormet_ENG$errormet$ME,
                   colvar_char = "model", cols = cols_gdifeng, cols_labs = labs, 
-                  x_title = "Bias (Mean Error)", y_title = expression("Number of field surveyed locations, "~ n[fs]), x_lims = c(-1,1.01))+
-  geom_vline(mapping = aes(xintercept = 0),size = .2, lty = "dotted", color = "black") + theme(legend.position = c(0.8,0.8))
+                  x_title = "Bias (Mean Error)", y_title = expression("Number of field surveyed locations, "~ n[fs]), x_lims = c(-1,1))+
+  geom_vline(mapping = aes(xintercept=-errormet_ENG$errormet$ME), color = ENG_col,fill = ENG_col, size = 0.4)+
+  geom_vline(mapping = aes(xintercept = 0),size = .2, lty = "dotted", color = "black") 
 
 # plot together
 pl <- list(p.MSE_SA, p.ME_SA)
 grid.arrange(grobs = lapply(pl, "+", theme(plot.margin = unit(c(20,20,20,20), "points"))), ncol = 2, nrow = 1)
 ```
+
 
 ```{r saving plots, results = 'hide', echo = F, eval=F}
 ## CORRELATION MATRIX (figure 4)
@@ -727,22 +923,26 @@ saveplot(plot = p.ENGval,width = 3.25, height = 2.6, file_locn = "results/Images
          file_name = paste0("map_ENGVAL_11dist_singlescenario_seed977"))
 
 ##ERROR HISTOGRAM (figure 7)
-saveplot(plot = p.error,width = 6.5, height = 3, file_locn = "results/Images/", 
-         file_name = paste0("hist_error_11dist_singlescenario_seed977"))
-ggsave(plot = p.error,filename =  "results/Images/hist_error_11dist_singlescenario_seed977.pdf", width = 6.5, height = 3, units = "in",dpi = 600)
-## SENSITIVITY ANALYSIS RESULTS (figure 8)
-# # mean squared error
-# saveplot(plot = p.MSE_SA, width = 3.25, height = 2.6, file_locn = "results/Images/",file_name = "MSE_SA")
-# ggsave(plot = p.MSE_SA,filename =  "results/Images/MSE_SA.pdf", width = 3.25, height = 2.6, units = "in",dpi = 600)
-# # mean error
-# saveplot(plot = p.ME_SA, width = 3.25, height = 2.6, file_locn = "results/Images/",file_name = "ME_SA")
-# ggsave(plot = p.ME_SA,filename =  "results/Images/ME_SA.pdf", width = 3.25, height = 2.6, units = "in",dpi = 600)
-```
+# all 11 districts
+# saveplot(plot = p.error,width = 3.25, height = 3, file_locn = "results/Images/", 
+         # file_name = paste0("hist_error_11dist_singlescenario_seed977"))
+ggsave(plot = p.error,filename =  "results/Images/hist_error_11dist_singlescenario_seed977.pdf", width = 3.25, height = 3, units = "in",dpi = 600)
+# Makawanpur
+# saveplot(plot = p.error_mak,width = 3.25, height = 1.5, file_locn = "results/Images/", 
+         # file_name = paste0("hist_error_11dist_makawanpur_singlescenario_seed977"))
+ggsave(plot = p.error_mak,filename =  "results/Images/hist_error_11dist_makawanpur_singlescenario_seed977.pdf", width = 3.25, height = 1.5, units = "in",dpi = 600)
+# Nuwakot
+# saveplot(plot = p.error_nuw,width = 3.25, height = 1.5, file_locn = "results/Images/", 
+         # file_name = paste0("hist_error_11dist_nuwakot_singlescenario_seed977"))
+ggsave(plot = p.error_nuw,filename =  "results/Images/hist_error_11dist_nuwakot_singlescenario_seed977.pdf", width = 3.25, height = 1.5, units = "in",dpi = 600)
 
-```{r for saving, echo=F, results='hide'}
-# merge predictions and errors with grid shape (some grids of grid shape willl have no predictions)
-alldat_shp <- merge(alldat_shp, pred_shp@data[,c(id_var, "RK_pred_fin", "RK_var_fin", "ERROR", "ENG_ERROR")], by = id_var, all.x = T)
-# save
+## SENSITIVITY ANALYSIS RESULTS (figure 8)
+# mean squared error
+# saveplot(plot = p.MSE_SA, width = 3.25, height = 2.6, file_locn = "results/Images/",file_name = "MSE_SA")
+ggsave(plot = p.MSE_SA,filename =  "results/Images/MSE_SA.pdf", width = 3.25, height = 2.6, units = "in",dpi = 600)
+# mean error
+# saveplot(plot = p.ME_SA, width = 3.25, height = 2.6, file_locn = "results/Images/",file_name = "ME_SA")
+ggsave(plot = p.ME_SA,filename =  "results/Images/ME_SA.pdf", width = 3.25, height = 2.6, units = "in",dpi = 600)
 ```
 
 # Session Info
@@ -753,5 +953,4 @@ devtools::session_info()
 
 # References
 ***
-
 
