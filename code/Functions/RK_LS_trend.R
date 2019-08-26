@@ -151,7 +151,8 @@ RK_LS_trend <- function(locn_shp = field_sample_shp,
       sig <- sum(res^2)/df
       se.GLS <- sqrt(diag(solve(t(X) %*% solve(C) %*% X)) * sig)
       # return gamma, C, and shapes
-      return(list(locn_shp = locn_shp, newdata_shp = newdata_shp, vgm = resid.vgm, RMSE=RMSE, se = list(ols = se.OLS,gls= se.GLS, ols.coeff = beta_OLS, gls.coeff = beta_gls)))
+      return(list(locn_shp = locn_shp, newdata_shp = newdata_shp, vgm = resid.vgm, RMSE=RMSE, 
+                  se = list(ols = se.OLS,gls= se.GLS, ols.coeff = as.data.frame(t(as.matrix(beta_OLS))), gls.coeff = as.data.frame(t(beta_gls)))))
       
     }else{
       # return gamma, C, and shapes
