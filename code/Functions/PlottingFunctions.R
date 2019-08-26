@@ -147,11 +147,13 @@ plot_coeff <- function(var_vec, # vector of variables
                        se_vec, # vector of standard errors of coefficients 
                        names_vec = var_vec, # names that you want to use for plotting (if different from var_vec) 
                        var_color, # color for coefficients and standard errors
+                       plot_true = F, # plot true coefficients?
+                       truecoeff_vec = NA, # vector of true coefficients (in same order as coeff_vec)
                        var_title = expression("Damage variable,"~ X[k]), 
                        coeff_title = expression("Trend coefficient,"~beta[k]),
                        base_size =10){
   beta_coeff <- data.frame(int = var_vec,
-                           beta = coeff_vec,
+                           beta = as.numeric(coeff_vec),
                            se = se_vec)
   beta_coeff$int <- as.factor(setNames(names_vec, beta_coeff$int))
   beta_coeff$int <- factor(beta_coeff$int,levels = beta_coeff$int[order(abs(beta_coeff$beta), decreasing = F)])
@@ -164,20 +166,27 @@ plot_coeff <- function(var_vec, # vector of variables
     labs(x = var_title, y = coeff_title)+
     scale_x_discrete(labels = newx)+
     coord_flip() + plotThemeCoeff(base_size = base_size)
+  if(plot_true){
+    beta_coeff$beta_true = as.numeric(truecoeff_vec)
+    p.coeff <- p.coeff + geom_point(data = beta_coeff, size = 0.75, aes(y = beta_true, x = int))
+  }
   return(p.coeff)
 }
 # variogram plot
 plot_vario <- function(variomod_trend,
                        variomod_detrend,
-                       c0_trend,
-                       c0_detrend,
-                       r_detrend,
+                       plot_true = F,
+                       variotrue = NA,
                        names_vario,
                        dist_title = "Distance, h (km)",
                        semivar_title = expression("Semivariance,"~gamma),
                        base_size = 10,
                        resid_col = GDIF_col,
                        trend_col = OG_col){
+  # sill and range parameters
+  c0_trend = variomod_trend$var_model$psill[1]
+  c0_detrend = variomod_detrend$var_model$psill[1]
+  r_detrend = variomod_detrend$var_model$range[2]
   # create dataframe for plotting
   vario.theor <- variogramLine(variomod_detrend$var_model, maxdist = max(variomod_detrend$exp_var$dist), dist_vector = variomod_detrend$exp_var$dist)
   vario.theor$gamma_exp <- variomod_detrend$exp_var$gamma
@@ -193,8 +202,8 @@ plot_vario <- function(variomod_trend,
   # plot variogram
   p.vario <- ggplot(vario.theor_melt) + 
     geom_segment(aes(x = r_detrend/1000, xend = r_detrend/1000, y = 0, yend = variogramLine(resid.vgm$var_model,dist_vector =r_detrend)$gamma), color = resid_col, lty = "dotted")+
-    geom_point(data = vario.theor[-1,],aes(x = dist/1000, y = gamma_trend_exp, size = np_trend), alpha = 0.5, color = trend_col)+
-    geom_point(data = vario.theor[-1,],aes(x = dist/1000, y = gamma_exp, size = np), alpha = 0.5, color = resid_col)+
+    geom_point(data = vario.theor[-1,],aes(x = dist/1000, y = gamma_trend_exp), alpha = 0.5, color = trend_col)+
+    geom_point(data = vario.theor[-1,],aes(x = dist/1000, y = gamma_exp), alpha = 0.5, color = resid_col)+
     geom_line(aes(x = dist/1000, y = value, group = variable, color = variable))+
     scale_x_continuous(expand = c(0, 0), limits = c(0,79)) + scale_y_continuous(expand = c(0, 0), limits = c(0,1.62))+
     scale_color_manual("", values = c(trend_col, resid_col))+
@@ -203,6 +212,16 @@ plot_vario <- function(variomod_trend,
     labs(x = dist_title, y = semivar_title, size = "Number of field surveyed grids")+
     plotTheme(base_size = base_size) + theme(legend.position = c(0.8,0.2), 
                                       legend.direction = "vertical") + guides(size = F)
+  if(plot_true){
+    c0true <- variotrue$var_model$psill[1]
+    vario.theor$dist_true <- append(0, resid.vgm_true$exp_var$dist)
+    vario.theor$gamma_true <- append(c0true, variogramLine(variotrue$var_model, maxdist = max(variotrue$exp_var$dist), dist_vector = variotrue$exp_var$dist)$gamma)
+    vario.theor$gamma_true_exp <- append(0,variotrue$exp_var$gamma)
+    vario.theor_melt <- reshape2::melt(vario.theor, id.vars = "dist", measure.vars = c("gamma_trend", "gamma", "gamma_true"))
+    levels(vario.theor_melt$variable) <- append(names_vario, "True residual variogram")
+    p.vario <- p.vario + geom_point(data = vario.theor[-1,],aes(x = dist_true/1000, y = gamma_true_exp), alpha = 0.5, color = "black") + 
+      geom_line(data = vario.theor,aes(x = dist/1000, y = gamma_true), alpha = 0.5, color = "black")
+  }
   return(p.vario)
 }
 
@@ -224,20 +243,21 @@ plot_SA_ridgeline <- function(SA_data,
   p.SA <- ggplot(data = SA_data, 
          aes_string(x = xvar_char, y = yvar_char)) +
     geom_density_ridges(rel_min_height = 0.0001,
-                        point_shape = "|", point_size = 0.3,point_alpha = 0.5,
-                        position = position_points_jitter(height = 0), jittered_points=T, 
+                        size = 0.5,
                         vline_size = 0.3, vline_color = cols_gdifeng[1],
-                        quantile_lines = TRUE, quantiles = 2, bandwidth = 0.0075,size = 0.3,
-                        aes_string(fill = colvar_char, colour = colvar_char, point_color = colvar_char), alpha = 0.5) +
+                        scale = 1.5, rel_min_height = 0.01, alpha = 0.5,
+                        stat = "binline", binwidth = 0.01,
+                        quantile_lines = TRUE, quantiles = 2,
+                        aes_string(fill = colvar_char, colour = colvar_char, height = "..count..")) +
     geom_vline(aes(xintercept = error_eng, colour = "ENG", fill = "ENG"),size = .5)+
-    scale_discrete_manual("point_color",name="Damage Data",values=cols, labels = cols_labs, guide = "none") +
+    # scale_discrete_manual("point_color",name="Damage Data",values=cols, labels = cols_labs, guide = "none") +
     scale_colour_manual(name="Damage Data",values=cols, labels = cols_labs,guide = "none") +
     scale_fill_manual(name="Damage data",values=cols, labels = cols_labs) +
     scale_y_discrete(expand = c(0,0.05))+
     scale_x_continuous(expand = c(0,0),limits = x_lims)+
     labs(x = x_title, y = y_title)+
     plotTheme(base_size = base_size)+
-    theme(legend.position = c(0.4,0.8), legend.direction = "vertical")
+    theme(legend.position = c(0.8,0.8), legend.direction = "vertical")
   return(p.SA)
 }
 
