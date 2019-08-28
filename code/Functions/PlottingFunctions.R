@@ -132,13 +132,13 @@ my_fn <- function(data = pred_grid_df, mapping, pts=list(), smt=list(), ...){
   ggplot(data = data, mapping = mapping, ...) + 
     do.call(geom_point, pts) +
     do.call(geom_smooth, smt) +
-    scale_color_manual(values = cols)
+    scale_color_manual(values = pts$cols)
 }
 # functions for histograms in the diagonals of a correlation matrix
-my_fn_diag <- function(data, mapping, dens=list(), ...){
+my_fn_diag <- function(data, mapping, dens=list(),...){
   ggplot(data = data, mapping = mapping, ...) + 
     do.call(geom_histogram, dens)+ 
-    scale_fill_manual(values = cols)
+    scale_fill_manual(values = dens$cols)
 }
 # coefficient plots
 # note all vectors should have matching order
@@ -161,7 +161,7 @@ plot_coeff <- function(var_vec, # vector of variables
   p.coeff <-
     ggplot(beta_coeff,aes(y = beta, x = int)) +
     geom_hline(aes(yintercept = 0), lty = "dotted", color = "black")+
-    geom_point(size =0.75, color = GDIF_col)+
+    geom_point(size =0.75, color = var_color)+
     geom_linerange(aes(ymin = beta - se/2, ymax = beta + se/2), color = var_color)+
     labs(x = var_title, y = coeff_title)+
     scale_x_discrete(labels = newx)+
