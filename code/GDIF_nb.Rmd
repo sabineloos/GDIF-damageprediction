@@ -81,7 +81,7 @@ source("code/Functions/comb_dup.R") # for combining dataframes with duplicate en
 source("code/Functions/sp2gg.R") #contains functions to convert spatial to ggplot dataframe
 ```
 
-```{r plotting things, echo=F, results='hide'}
+```{r plotting things, echo = F, results = "hide"}
 # colors
 GDIF_col <- viridis::viridis_pal()(25)[9]
 ENG_col <- "gray30"
@@ -257,10 +257,10 @@ p.corr <- ggpairs(dplyr::filter(comb_wide, ENG_mnDR > 0),columns = 1:5,
              upper = list(continuous = gglegend("points")),
              diag = list(continuous = wrap(my_fn_diag,
                                            dens = list(aes(fill = locns, y = ..density..),
-                                                       bins = 20,position = "identity",colour = "transparent", alpha = 0.65))),
+                                                       bins = 20,position = "identity",colour = "transparent", alpha = 0.65, cols = cols))),
              lower = list(continuous = wrap(my_fn,
-                                            pts=list(data = dplyr::filter(comb_wide[append(sample(10000, 1000,replace = F),10000:10100),], 
-                                                                          ENG_mnDR >0),shape = ".",alpha = 0.5 ,aes(colour=locns)), 
+                                            pts=list(data = dplyr::filter(comb_wide[append(sample(10000, 1000,replace = F),10000:10100),],
+                                                                          ENG_mnDR >0),shape = ".",alpha = 0.5 ,aes(colour=locns), cols = cols),
                                             smt=list(method="loess", se=F, size=1, aes(colour = locns)))),
              columnLabels = c("True damage","Eng. forecast", "Damage proxy map", "Shaking intensity", "Elevation")
              )+
@@ -598,7 +598,7 @@ errormet$errormet
 ## Compare G-DIF to engineering forecast
 These error metrics don't necessarily indicate how well G-DIF performs unless we compare to another damage dataset. Here, we compare to the engineering forecast which is an input to G-DIF. Theoretically, G-DIF should be more accurate than the forecast.
 
-In order to compare the two directly, we have to convert the engineering forecast to the same units as the G-DIF prection ( aka mean damage ratio to mean damage grade). We do this by binning the damage ratios according to the damage grades described in @Grunthal1998.
+In order to compare the two directly, we have to convert the engineering forecast to the same units as the G-DIF prection (aka mean damage ratio to mean damage grade). We do this by binning the damage ratios according to the damage grades described in @Grunthal1998.
 ```{r engineering forecast conversion}
 ## convert from mean damage ratio to damage grade 
 pred_shp$ENG_val <- cut(alldat_shp$ENG_mnDR[ind_bldgs], breaks=c(-.0001, .01, .2, .6, .99, 1))
