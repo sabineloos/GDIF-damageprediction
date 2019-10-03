@@ -168,7 +168,7 @@ plot_coeff <- function(var_vec, # vector of variables
     coord_flip() + plotThemeCoeff(base_size = base_size)
   if(plot_true){
     beta_coeff$beta_true = as.numeric(truecoeff_vec)
-    p.coeff <- p.coeff + geom_point(data = beta_coeff, size = 0.75, aes(y = beta_true, x = int))
+    p.coeff <- p.coeff + geom_point(data = beta_coeff, size = 0.75,shape=8, aes(y = beta_true, x = int))
   }
   return(p.coeff)
 }
