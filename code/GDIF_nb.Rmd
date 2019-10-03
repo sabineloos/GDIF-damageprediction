@@ -407,6 +407,12 @@ We also identify the trend model from `RK_LS_trend` the resulted in the lowest R
 - `trnd_RKfin` = the final trend estimate 
 - `trnd_RKfin_var`  = the final variance of that trend estimate
 
+The equations for the variance of the GLS trend is:
+
+$$
+    \hat{\sigma}_m^2 = (\textbf{X}_0 - \textbf{X}^\top \textbf{C}^{-1} \textbf{C}_0)^\top \cdot (\textbf{X}^\top \textbf{C}^{-1} \textbf{X})^{-1} \cdot (\textbf{X}_0 - \textbf{X}^\top \textbf{C}^{-1} \textbf{C}_0)
+$$
+
 In addition, we assign the residuals of the estimated trend and the true damage in `field_sample_shp` as `trnd_resid_fin`.
 
 ```{r calculate residuals}
@@ -509,6 +515,12 @@ We can now add the kriging predictions to `pred_shp` as:
 
 - `resid_pred_OK` = predicted residuals from kriging
 - `resid_var_OK` = variance of the residual prediction from kriging
+
+The equations for trend variance for ordinary kriging is:
+
+$$
+    \hat{\sigma}_\epsilon^2 = b +\nu - \pmb{\lambda}^\top \mathbf{C}_0
+$$
 
 ```{r add kriging pred}
 # Add kriging results to prediction dataframe
@@ -843,8 +855,10 @@ for (i in seq_along(unique(dist11_shp$DNAME))) {
     labs(title = unique(dist11_shp$DNAME)[i])+
     theme(legend.position = c(0.8,0.8), legend.title = element_blank(), axis.text = element_blank(), axis.title.x = element_blank(), axis.title.y = element_blank())
 }
-
-grid.arrange(grobs = lapply(pl, "+", theme(plot.margin = unit(c(10,10,10,10), "points"))), ncol = 3, nrow = 4)
+# Remove kathmandu valley
+ind_kv <- which(unique(dist11_shp$DNAME) %in% c("LALITPUR", "BHAKTAPUR", "KATHMANDU"))
+# Plot districts together
+grid.arrange(grobs = lapply(pl[-ind_kv], "+", theme(plot.margin = unit(c(10,10,10,10), "points"))), ncol = 4, nrow = 3)
 ```
 
 ## Sensitivity to number of field surveys
@@ -911,7 +925,7 @@ p.ENGval <- plot_raster_nepal(pred_rast$ENG_val, legend_title = "Mean Damage Gra
   plotThemeMap(base_size = 8)
 # final damage prediction
 saveplot(plot = p.rkpredfin,width = 3.25, height = 2.6, file_locn = "results/Images/", 
-         file_name = paste0("map_RKpredfin_11dist_singlescenario_seed977"))
+         file_name = "map_RKpredfin_11dist_singlescenario_seed977")
 # final variance
 saveplot(plot = p.rkvarfin,width = 3.25, height = 2.6, file_locn = "results/Images/", 
          file_name = paste0("map_RK_varfin_11dist_singlescenario_seed977"))
