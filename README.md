@@ -4,6 +4,8 @@ This repository contains the source code and *some* of the data to apply the geo
 
 *insert citation here sabine* 
 
+
+
 ## Licensing and availability
 
 The code and the data are both licensed under the CC-by-NC-SA license. Feel free to use either based on the terms and conditions listed in the LICENSE.md file in the code and data's respective folders and reference the above paper. We intend this code to be used for NON-COMMERCIAL uses, if you'd like to use either for commercial uses, please contact Sabine Loos at  [sloos@stanford.edu](mailto::sloos@stanford.edu).
@@ -11,6 +13,8 @@ The code and the data are both licensed under the CC-by-NC-SA license. Feel free
 ### Data availability
 
 Because the data used in this paper at this resolution is proprietary to the Government of Nepal, we cannot make the data available at this time. However, we urge users to recreate the analysis using the open data listed in the "GDIF_nb.Rmd" file. All data on the impact of the 2015 Nepal earthquake has been made openly available at the ward-level at [http://eq2015.npc.gov.np/#/](http://eq2015.npc.gov.np/#/).
+
+
 
 ## Using the code
 

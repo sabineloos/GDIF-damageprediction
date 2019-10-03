@@ -113,7 +113,7 @@ We convert each dataset to the same support and load as one spatial dataframe (*
 
 ```{r Loading dataframes}
 # Load data frame that has been prepared for the framework
-alldat_shp <- readRDS(file = "data/Nepal_11dist_damagedata_grids.rds")
+alldat_shp <- readRDS(file = "data/Nepal_11dist_damagedata_grids.rds") # this doesn't work, since data is not available
 head(alldat_shp@data[which(!is.na(alldat_shp$DPM_bldg_med)),])
 ```
 
