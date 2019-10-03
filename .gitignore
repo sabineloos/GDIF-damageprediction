@@ -36,3 +36,6 @@ vignettes/*.pdf
 rsconnect/
 .Rproj.user
 results/
+results_Data.RData
+code/GDIF_nb.html
+code/GDIF_nb.nb.html
