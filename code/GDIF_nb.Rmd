@@ -162,6 +162,7 @@ seconddat_vars <- c("ENG_mnDR","DPM_bldg_med","MMI_mn","DEM_mn")
 nsurvey = 100
 
 # DEFINE seed (for reproducibility purposes) 
+RNGkind(sample.kind = "Rounding") # define random number genertor (for R3.6.0 difference in RNG)
 seed = 977 # this is the area code for Nepal ;)
 
 # DEFINE local kriging parameters (optional)

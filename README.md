@@ -2,9 +2,9 @@
 
 This repository contains the source code and *some* of the data to apply the geospatial data integration framework (G-DIF) to data from the 2015 Nepal Earthquake and replicate key results from the following paper:
 
-*insert citation here sabine* 
+Loos, Sabine, David Lallemant, Jack Baker, Jamie McCaughey, Sang-Ho Yun, Nama Budhathoki, Feroz Khan, and Ritika Singh. “G-DIF: A Geospatial Data Integration Framework to Rapidly Estimate Post-Earthquake Damage (In Review).” *Earthquake Spectra*, 2019. 
 
-
+Since we will be updating the code over time, to find the specific version associated with this paper please see the zip files located on the Stanford Digital Repository:  https://purl.stanford.edu/gn368cq4893.
 
 ## Licensing and availability
 
@@ -18,10 +18,12 @@ Because the data used in this paper at this resolution is proprietary to the Gov
 
 ## Using the code
 
-The markdown titled "GDIF_nb.Rmd" stitches all functions together. To knit this file, run the "run.sh" file in your command line.
+The interactive code for this paper can be found at  https://sabineloos.github.io/GDIF-damageprediction/GDIF_nb.html.
+
+If you would like to develop this yourself, the markdown titled "GDIF_nb.Rmd" stitches all functions together. To knit this file, run the "run.sh" file in your command line.
 
 ### Required Operating Environment
 
 This code was developed using R version 3.5.2. All necessary packages for this code to run are included in the "install.R" file. You can see the session info for this code at the bottom of the "GDIF_nb.Rmd".
 
-Copyright (c) Sabine Loos, 2019.
+Copyright (c) Sabine Loos, 2020.

@@ -286,8 +286,8 @@ plot_raster_nepal <- function(raster, draw_kathmandu = T,
   # adding scale bar
   if(draw_scalebar){
     require(ggsn)
-    p <- p + ggsn::scalebar(dist11_gg,location = "bottomleft",dist = 25, 
-                            st.size=2, height=0.01, dd2km = TRUE, model = 'WGS84')
+    p <- p + ggsn::scalebar(dist11_gg,location = "bottomleft",dist = 25, transform = T,
+                            dist_unit = "km", st.size=2, height=0.01,  model = 'WGS84')
   }
     
   
@@ -338,8 +338,8 @@ plot_points_nepal <- function(field_df, draw_kathmandu = T,
   
   # base plot (just points)
   p <- ggplot(field_df) + geom_point(data = field_df, aes(coords.x1, coords.x2,...))+
-    ggsn::scalebar(dist11_gg,location = "bottomleft",dist = 25, 
-             st.size=2, height=0.01, dd2km = TRUE, model = 'WGS84')
+    ggsn::scalebar(dist11_gg,location = "bottomleft",dist = 25, transform = T,
+                   dist_unit = "km", st.size=2, height=0.01,  model = 'WGS84')
   
   # adding districts
   if(draw_districts){
