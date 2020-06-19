@@ -30,13 +30,13 @@ bibliography: '../results/references.bib'
 ```{r setup, echo=F}
 # SETUP
 knitr::opts_knit$set(root.dir = normalizePath(".."))
-knitr::opts_chunk$set(warning = F, message = F, dpi = 600, fig.align = 'center')
+knitr::opts_chunk$set(warning = F, message = F, dpi = 800, fig.align = 'center')
 ```
 
 # Introduction to the framework and application
 ***
 <br>
-In this notebook, we run through the basic steps to implement the geospatial data integration framework (G-DIF) presented in "A geospatial data integration framework to rapidly estimate post-disaster damage" by Sabine Loos , Jack Baker, David Lallemant, Nama Budhathoki, Sang-Ho Yun, Jamie McCaughey, Ritika Singh, and Feroz Khan.  
+In this notebook, we run through the basic steps to implement the geospatial data integration framework (G-DIF) presented in "A geospatial data integration framework to rapidly estimate post-disaster damage" by Sabine Loos , Jack Baker, David Lallemant, Nama Budhathoki, Sang-Ho Yun, Jamie McCaughey, Ritika Singh, and Feroz Khan, which is available online at [https://www.researchgate.net/publication/341946463_G-DIF_A_geospatial_data_integration_framework_to_rapidly_estimate_post-earthquake_damage](https://www.researchgate.net/publication/341946463_G-DIF_A_geospatial_data_integration_framework_to_rapidly_estimate_post-earthquake_damage).
 
 The **goal** of this paper is to provide a framework to integrate multiple damage data sources that become available after an earthquake, including: field surveys, remotely-sensed proxies, engineering forecasts, and other geospatial covariates. More information can be found in the paper, but here is the general flowchart:
 
@@ -903,15 +903,15 @@ saveplot(plot = p.DEM,width = 1.150, height = 0.921, file_locn = "results/Images
 saveplot(plot = p.ENG,width = 1.150, height = 0.921, file_locn = "results/Images/",file_name = paste0("AOI_ENGmnDR"))
 saveplot(plot = p.GT,width = 1.150, height = 0.921, file_locn = "results/Images/",file_name = paste0("AOI_GTmnDG"))
 # save correlation matrix
-ggsave(plot = p.corr,"results/Images/correlationmat_seed977.pdf", width = 6.5, height = 6.5, units = "in",dpi = 600)
+ggsave(plot = p.corr,"results/Images/correlationmat_seed977.pdf", width = 6.5, height = 6.5, units = "in",dpi = 800)
 
 ## COEFFICIENTS AND VARIOGRAM (figure 5)
 # coefficients
 saveplot(plot = p.coeff,width = 3.25, height = 3, file_locn = "results/Images/", 
-         file_name = paste0("OLStrend_singlescenario_seed977"))
+         file_name = paste0("OLStrend_singlescenario_seed977"), dpi = 800)
 # variogram
 saveplot(plot = p.vario,width = 3.25, height = 3, file_locn = "results/Images/", 
-         file_name = paste0("MaternVario_singlescenario_seed977"))
+         file_name = paste0("MaternVario_singlescenario_seed977"), dpi = 800)
 
 ## FINAL RESULTS (figure 6)
 # replot maps without titles
@@ -926,38 +926,38 @@ p.ENGval <- plot_raster_nepal(pred_rast$ENG_val, legend_title = "Mean Damage Gra
   plotThemeMap(base_size = 8)
 # final damage prediction
 saveplot(plot = p.rkpredfin,width = 3.25, height = 2.6, file_locn = "results/Images/", 
-         file_name = "map_RKpredfin_11dist_singlescenario_seed977")
+         file_name = "map_RKpredfin_11dist_singlescenario_seed977", dpi = 800)
 # final variance
 saveplot(plot = p.rkvarfin,width = 3.25, height = 2.6, file_locn = "results/Images/", 
-         file_name = paste0("map_RK_varfin_11dist_singlescenario_seed977"))
+         file_name = paste0("map_RK_varfin_11dist_singlescenario_seed977"), dpi = 800)
 # true damage (full map)
 saveplot(plot = p.GT,width = 3.25, height = 2.6, file_locn = "results/Images/", 
-         file_name = paste0("map_GT_mnDG_11dist"))
+         file_name = paste0("map_GT_mnDG_11dist"), dpi = 800)
 # engineering values in mean damage grade
 saveplot(plot = p.ENGval,width = 3.25, height = 2.6, file_locn = "results/Images/", 
-         file_name = paste0("map_ENGVAL_11dist_singlescenario_seed977"))
+         file_name = paste0("map_ENGVAL_11dist_singlescenario_seed977"), dpi = 800)
 
 ##ERROR HISTOGRAM (figure 7)
 # all 11 districts
 # saveplot(plot = p.error,width = 3.25, height = 3, file_locn = "results/Images/", 
          # file_name = paste0("hist_error_11dist_singlescenario_seed977"))
-ggsave(plot = p.error,filename =  "results/Images/hist_error_11dist_singlescenario_seed977.pdf", width = 3.25, height = 3, units = "in",dpi = 600)
+ggsave(plot = p.error,filename =  "results/Images/hist_error_11dist_singlescenario_seed977.pdf", width = 3.25, height = 3, units = "in",dpi = 800)
 # Makawanpur
 # saveplot(plot = p.error_mak,width = 3.25, height = 1.5, file_locn = "results/Images/", 
          # file_name = paste0("hist_error_11dist_makawanpur_singlescenario_seed977"))
-ggsave(plot = p.error_mak,filename =  "results/Images/hist_error_11dist_makawanpur_singlescenario_seed977.pdf", width = 3.25, height = 1.5, units = "in",dpi = 600)
+ggsave(plot = p.error_mak,filename =  "results/Images/hist_error_11dist_makawanpur_singlescenario_seed977.pdf", width = 3.25, height = 1.5, units = "in",dpi = 800)
 # Nuwakot
 # saveplot(plot = p.error_nuw,width = 3.25, height = 1.5, file_locn = "results/Images/", 
          # file_name = paste0("hist_error_11dist_nuwakot_singlescenario_seed977"))
-ggsave(plot = p.error_nuw,filename =  "results/Images/hist_error_11dist_nuwakot_singlescenario_seed977.pdf", width = 3.25, height = 1.5, units = "in",dpi = 600)
+ggsave(plot = p.error_nuw,filename =  "results/Images/hist_error_11dist_nuwakot_singlescenario_seed977.pdf", width = 3.25, height = 1.5, units = "in",dpi = 800)
 
 ## SENSITIVITY ANALYSIS RESULTS (figure 8)
 # mean squared error
 # saveplot(plot = p.MSE_SA, width = 3.25, height = 2.6, file_locn = "results/Images/",file_name = "MSE_SA")
-ggsave(plot = p.MSE_SA,filename =  "results/Images/MSE_SA.pdf", width = 3.25, height = 2.6, units = "in",dpi = 600)
+ggsave(plot = p.MSE_SA,filename =  "results/Images/MSE_SA.pdf", width = 3.25, height = 2.6, units = "in",dpi = 800)
 # mean error
 # saveplot(plot = p.ME_SA, width = 3.25, height = 2.6, file_locn = "results/Images/",file_name = "ME_SA")
-ggsave(plot = p.ME_SA,filename =  "results/Images/ME_SA.pdf", width = 3.25, height = 2.6, units = "in",dpi = 600)
+ggsave(plot = p.ME_SA,filename =  "results/Images/ME_SA.pdf", width = 3.25, height = 2.6, units = "in",dpi = 800)
 ```
 
 # Session Info

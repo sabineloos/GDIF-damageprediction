@@ -287,7 +287,7 @@ plot_raster_nepal <- function(raster, draw_kathmandu = T,
   if(draw_scalebar){
     require(ggsn)
     p <- p + ggsn::scalebar(dist11_gg,location = "bottomleft",dist = 25, transform = T,
-                            dist_unit = "km", st.size=2, height=0.01,  model = 'WGS84')
+                            dist_unit = "km", st.size=2, height=0.015,border.size = 0.25,  model = 'WGS84')
   }
     
   
@@ -358,7 +358,7 @@ plot_points_nepal <- function(field_df, draw_kathmandu = T,
 }
 # Saving plots ------------------------------------------------------------
 saveplot <- function(plot = last_plot(), width = 6, height = 4, 
-                     units = "in", dpi = 600, 
+                     units = "in", dpi = 800, 
                      file_locn = "figs/DPM_bound_data/", 
                      file_name = "plot",...){
   ggsave(paste0(file_locn, file_name, ".png"), plot = plot, 
