@@ -2,7 +2,7 @@
 
 This repository contains the source code and *some* of the data to apply the geospatial data integration framework (G-DIF) to data from the 2015 Nepal Earthquake and replicate key results from the following paper:
 
-Loos, Sabine, David Lallemant, Jack Baker, Jamie McCaughey, Sang-Ho Yun, Nama Budhathoki, Feroz Khan, and Ritika Singh. “G-DIF: A Geospatial Data Integration Framework to Rapidly Estimate Post-Earthquake Damage.” *Earthquake Spectra*, 2019. [https://journals.sagepub.com/doi/abs/10.1177/8755293020926190](https://journals.sagepub.com/doi/abs/10.1177/8755293020926190).
+Loos, Sabine, David Lallemant, Jack Baker, Jamie McCaughey, Sang-Ho Yun, Nama Budhathoki, Feroz Khan, and Ritika Singh. “G-DIF: A Geospatial Data Integration Framework to Rapidly Estimate Post-Earthquake Damage.” *Earthquake Spectra*, 2020. [https://journals.sagepub.com/doi/abs/10.1177/8755293020926190](https://journals.sagepub.com/doi/abs/10.1177/8755293020926190).
 
 Since we will be updating the code over time, to find the specific version associated with this paper please see the zip files located on the Stanford Digital Repository:  https://purl.stanford.edu/gn368cq4893.
 
