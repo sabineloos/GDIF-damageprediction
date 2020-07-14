@@ -36,7 +36,7 @@ knitr::opts_chunk$set(warning = F, message = F, dpi = 800, fig.align = 'center')
 # Introduction to the framework and application
 ***
 <br>
-In this notebook, we run through the basic steps to implement the geospatial data integration framework (G-DIF) presented in "A geospatial data integration framework to rapidly estimate post-disaster damage" by Sabine Loos , Jack Baker, David Lallemant, Nama Budhathoki, Sang-Ho Yun, Jamie McCaughey, Ritika Singh, and Feroz Khan, which is available online at [https://www.researchgate.net/publication/341946463_G-DIF_A_geospatial_data_integration_framework_to_rapidly_estimate_post-earthquake_damage](https://www.researchgate.net/publication/341946463_G-DIF_A_geospatial_data_integration_framework_to_rapidly_estimate_post-earthquake_damage).
+In this notebook, we run through the basic steps to implement the geospatial data integration framework (G-DIF) presented in "A geospatial data integration framework to rapidly estimate post-disaster damage" by Sabine Loos , Jack Baker, David Lallemant, Nama Budhathoki, Sang-Ho Yun, Jamie McCaughey, Ritika Singh, and Feroz Khan, which is available online at [https://doi.org/10.1177/8755293020926190](https://doi.org/10.1177/8755293020926190).
 
 The **goal** of this paper is to provide a framework to integrate multiple damage data sources that become available after an earthquake, including: field surveys, remotely-sensed proxies, engineering forecasts, and other geospatial covariates. More information can be found in the paper, but here is the general flowchart:
 
