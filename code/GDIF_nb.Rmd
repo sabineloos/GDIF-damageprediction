@@ -181,6 +181,7 @@ targ_max <- max(alldat_shp$GT_OUT, na.rm = T)
 - `seed` = the random seed we use for reproducibility. Here we use `r seed`, which is the area code for Kathmandu :)
 - `id_var` = ID variable
 - `maxdist.multiplier` = For the spatial correlation model, we krige the residuals only using points within `r maxdist.multiplier` times the spatial correlation range of a point
+- `nmin` and `nmax` = For the spatial correlation model, the minimum and maximum number of points to consider as an alternative to `maxdist.multiplier`
 
 ```{r finding areas with dpm}
 # grids with buildings
