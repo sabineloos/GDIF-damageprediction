@@ -8,7 +8,7 @@ Since we will be updating the code over time, to find the specific version assoc
 
 ## Licensing and availability
 
-The code and the data are both licensed under the CC-by-NC-SA license. Feel free to use either based on the terms and conditions listed in the LICENSE.md file in the code and data's respective folders and reference the above paper. We intend this code to be used for NON-COMMERCIAL uses, if you'd like to use either for commercial uses, please contact Sabine Loos at  [sloos@stanford.edu](mailto::sloos@stanford.edu).
+The code and the data are both licensed under the CC-by-NC-SA license. Feel free to use either based on the terms and conditions listed in the LICENSE.md file in the code and data's respective folders and reference the above paper. We intend this code to be used for NON-COMMERCIAL uses, if you'd like to use either for commercial uses, please contact Sabine Loos at  [sloos@umich.edu](mailto::sloos@umich.edu).
 
 ### Data availability
 
